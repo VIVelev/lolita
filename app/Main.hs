@@ -1,6 +1,7 @@
 {-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
 
 {-# HLINT ignore "Redundant lambda" #-}
+{-# HLINT ignore "Use tuple-section" #-}
 
 module Main where
 
@@ -27,7 +28,7 @@ data Term
 data Value
   = Wrong
   | Num Int
-  | Fun (Value -> P Value)
+  | Fun (Value -> S Value)
 
 instance Show Value where
   show Wrong = "<wrong>"
@@ -36,36 +37,36 @@ instance Show Value where
 
 type Environment = [(Name, Value)]
 
-interp :: Term -> Environment -> P Value
+interp :: Term -> Environment -> S Value
 interp (Var x) e = lookup x e
-interp (Con i) _ = unitP (Num i)
+interp (Con i) _ = unitS (Num i)
 interp (Add u v) e =
-  interp u e `bindP` \a ->
-    interp v e `bindP` \b ->
+  interp u e `bindS` \a ->
+    interp v e `bindS` \b ->
       add a b
-interp (Lam x t) e = unitP (Fun (\a -> interp t ((x, a) : e)))
+interp (Lam x t) e = unitS (Fun (\a -> interp t ((x, a) : e)))
 interp (App t u) e =
-  interp t e `bindP` \f ->
-    interp u e `bindP` \a ->
+  interp t e `bindS` \f ->
+    interp u e `bindS` \a ->
       apply f a
-interp (At q t) e = resetP q $ interp t e
+interp (At q t) e = interp t e
 
-lookup :: Name -> Environment -> P Value
-lookup x [] = errorP $ "unknown variable: " ++ x
-lookup x ((y, b) : e) = if x == y then unitP b else lookup x e
+lookup :: Name -> Environment -> S Value
+lookup x [] = unitS Wrong -- errorP $ "unknown variable: " ++ x
+lookup x ((y, b) : e) = if x == y then unitS b else lookup x e
 
-add :: Value -> Value -> P Value
-add (Num i) (Num j) = unitP $ Num (i + j)
-add a b =
-  errorP $
+add :: Value -> Value -> S Value
+add (Num i) (Num j) = tickS `bindS` (\() -> unitS $ Num (i + j))
+add _ _ = unitS Wrong
+  {--errorP $
     "shoud be numbers: "
       ++ show a
       ++ ","
-      ++ show b
+      ++ show b--}
 
-apply :: Value -> Value -> P Value
-apply (Fun f) a = f a
-apply t _ = errorP $ "not a function: " ++ show t
+apply :: Value -> Value -> S Value
+apply (Fun f) a = tickS `bindS` (\() -> f a)
+apply t _ = unitS Wrong -- errorP $ "not a function: " ++ show t
 
 -- Error Monad
 data E a = Success a | Error String
@@ -102,6 +103,25 @@ showP m = showE (m pos0)
 resetP :: Position -> P a -> P a
 resetP q m = \_ -> m q
 
+-- State Monad
+type State = Integer
+type S a = State -> (a, State)
+
+unitS :: a -> S a
+unitS a = \s0 -> (a, s0)
+
+bindS :: S a -> (a -> S b) -> S b
+m `bindS` k = \s0 -> let (a, s1) = m s0
+                         (b, s2) = k a s1
+                     in (b, s2)
+
+showS :: Show a => S a -> String
+showS m = let (a, s0) = m 0
+          in "Result: " ++ show a ++ "; Count: " ++ show s0
+
+tickS :: S ()
+tickS s0 = ((), s0+1)
+
 {- ORMOLU_DISABLE -}
 -- Suppose the input file is:
 -- ((lambda (x)
@@ -116,7 +136,7 @@ term =
                 (At (Position (1, 3))
                     (Add
                       (At (Position (1, 6)) (Var "x"))
-                      (At (Position (1, 8)) (Var "y"))))))
+                      (At (Position (1, 8)) (Var "x"))))))
           (At (Position (2, 2))
               (Add
                 (At (Position (2, 5)) (Con 10))
@@ -124,7 +144,7 @@ term =
 {- ORMOLU_ENABLE -}
 
 test :: Term -> String
-test t = showP $ interp t []
+test t = showS $ interp t []
 
 main :: IO ()
 main = print $ test term
