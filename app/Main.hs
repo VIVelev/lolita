@@ -1,11 +1,13 @@
-{-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
-
 {-# HLINT ignore "Redundant lambda" #-}
 {-# HLINT ignore "Use tuple-section" #-}
+{-# OPTIONS_GHC -Wno-noncanonical-monad-instances #-}
+{-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
 
 module Main where
 
 import Prelude hiding (lookup)
+import Control.Monad (liftM)
+import GHC.Base (ap)
 
 type Name = String
 
@@ -23,50 +25,46 @@ data Term
   | Add Term Term
   | Lam Name Term
   | App Term Term
-  | At Position Term
+  -- | At Position Term
+  | CallCC Name Term
 
 data Value
-  = Wrong
+  = Wrong String
   | Num Int
-  | Fun (Value -> S Value)
+  | Fun (Value -> K Value)
 
 instance Show Value where
-  show Wrong = "<wrong>"
+  show (Wrong s) = "<wrong>: " ++ s
   show (Num i) = show i
   show (Fun _) = "<function>"
 
 type Environment = [(Name, Value)]
 
-interp :: Term -> Environment -> S Value
+interp :: Term -> Environment -> K Value
 interp (Var x) e = lookup x e
-interp (Con i) _ = unitS (Num i)
-interp (Add u v) e =
-  interp u e `bindS` \a ->
-    interp v e `bindS` \b ->
-      add a b
-interp (Lam x t) e = unitS (Fun (\a -> interp t ((x, a) : e)))
-interp (App t u) e =
-  interp t e `bindS` \f ->
-    interp u e `bindS` \a ->
-      apply f a
-interp (At q t) e = interp t e
+interp (Con i) _ = return (Num i)
+interp (Add u v) e = do
+  a <- interp u e
+  b <- interp v e
+  return $ add a b
+interp (Lam x t) e = return $ Fun (\a -> interp t ((x, a) : e))
+interp (App t u) e = do
+  f <- interp t e
+  a <- interp u e
+  case f of
+    (Fun ff) -> ff a
+    _ -> return $ Wrong "not a function"
+-- interp (At _ t) e = interp t e
+interp (CallCC x t) e =
+  K $ \c -> runK (interp t $ (x, Fun $ \v -> K $ \_ -> c v) : e) c
 
-lookup :: Name -> Environment -> S Value
-lookup x [] = unitS Wrong -- errorP $ "unknown variable: " ++ x
-lookup x ((y, b) : e) = if x == y then unitS b else lookup x e
+lookup :: Name -> Environment -> K Value
+lookup _ [] = return $ Wrong "lookup failed"
+lookup x ((y, b) : e) = if x == y then return b else lookup x e
 
-add :: Value -> Value -> S Value
-add (Num i) (Num j) = tickS `bindS` (\() -> unitS $ Num (i + j))
-add _ _ = unitS Wrong
-  {--errorP $
-    "shoud be numbers: "
-      ++ show a
-      ++ ","
-      ++ show b--}
-
-apply :: Value -> Value -> S Value
-apply (Fun f) a = tickS `bindS` (\() -> f a)
-apply t _ = unitS Wrong -- errorP $ "not a function: " ++ show t
+add :: Value -> Value -> Value
+add (Num i) (Num j) = Num $ i + j
+add _ _ = Wrong "not a number"
 
 -- Error Monad
 data E a = Success a | Error String
@@ -105,46 +103,95 @@ resetP q m = \_ -> m q
 
 -- State Monad
 type State = Integer
+
 type S a = State -> (a, State)
 
 unitS :: a -> S a
 unitS a = \s0 -> (a, s0)
 
 bindS :: S a -> (a -> S b) -> S b
-m `bindS` k = \s0 -> let (a, s1) = m s0
-                         (b, s2) = k a s1
-                     in (b, s2)
+m `bindS` k = \s0 ->
+  let (a, s1) = m s0
+      (b, s2) = k a s1
+   in (b, s2)
 
-showS :: Show a => S a -> String
-showS m = let (a, s0) = m 0
-          in "Result: " ++ show a ++ "; Count: " ++ show s0
+showS :: (Show a) => S a -> String
+showS m =
+  let (a, s0) = m 0
+   in "Result: " ++ show a ++ "; Count: " ++ show s0
 
 tickS :: S ()
-tickS s0 = ((), s0+1)
+tickS s0 = ((), s0 + 1)
 
-{- ORMOLU_DISABLE -}
+-- Continuation
+type Answer = Value
+newtype K a = K { runK :: (a -> Answer) -> Answer }
+
+instance Functor K where
+  fmap = liftM
+
+instance Applicative K where
+  pure = return
+  (<*>) = ap
+
+instance Monad K where
+  m >>= k = K $ \c -> runK m $ \a -> runK (k a) c
+  return a = K $ \c -> c a
+
+instance Show (K Value) where
+  show m = show $ runK m id
+
 -- Suppose the input file is:
 -- ((lambda (x)
 --    (+ x x))
 --   (+ 10 11))
 --
-term :: Term
-term =
-  At (Position (0, 0))
-     (App (At (Position (0, 1))
-              (Lam "x"
-                (At (Position (1, 3))
-                    (Add
-                      (At (Position (1, 6)) (Var "x"))
-                      (At (Position (1, 8)) (Var "x"))))))
-          (At (Position (2, 2))
-              (Add
-                (At (Position (2, 5)) (Con 10))
-                (At (Position (2, 8)) (Con 11)))))
-{- ORMOLU_ENABLE -}
+term0 :: Term
+term0 = App (Lam "x" (Add (Var "x") (Var "x"))) (Add (Con 10) (Con 11))
+
+-- Suppose the input file is:
+-- ((lambda (x)
+--    (+ x x))
+--   (+ 10 11))
+--
+-- The above code is the same as the following code:
+-- ((lambda (x)
+--    (+ x x))
+--   21)
+--
+-- The above code is the same as the following code:
+-- (+ 21 21)
+
+
+-- Now with Position matadata
+-- term :: Term
+-- term =
+--   At (Position (0, 0))
+--      (App (At (Position (0, 1))
+--               (Lam "x"
+--                 (At (Position (1, 3))
+--                     (Add
+--                       (At (Position (1, 6)) (Var "x"))
+--                       (At (Position (1, 8)) (Var "x"))))))
+--           (At (Position (2, 2))
+--               (Add
+--                 (At (Position (2, 5)) (Con 10))
+--                 (At (Position (2, 8)) (Con 11)))))
+
+-- A call/cc!
+-- Suppose we have the following code:
+-- ((lambda (x)
+--    (call/cc (k) (+ x (k x))))
+--   (+ 10 11))
+-- This translates to:
+term2 :: Term
+term2 =
+  App
+    (Lam "x" (CallCC "k" (Add (Var "x") (App (Var "k") (Var "x")))))
+    (Add (Con 10) (Con 11))
 
 test :: Term -> String
-test t = showS $ interp t []
+test t = show $ interp t []
 
 main :: IO ()
-main = print $ test term
+main = print $ test term2
