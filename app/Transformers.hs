@@ -74,17 +74,19 @@ runEval2 = runIdentity . runExceptT
 
 eval2 :: Env -> Exp -> Eval2 Value
 eval2 env (Lit i) = return $ IntVal i
-eval2 env (Var n) = return . fromJust $ Map.lookup n env
+eval2 env (Var n) = case Map.lookup n env of
+  Nothing -> throwExcept $ "unbound variable: " ++ n
+  Just val -> return val
 eval2 env (Add e1 e2) = do
   v1 <- eval2 env e1
   v2 <- eval2 env e2
   case (v1, v2) of
     (IntVal i1, IntVal i2) -> return $ IntVal $ i1 + i2
-    _ -> throwExcept "type error"
+    _ -> throwExcept $ "not a number: " ++ show v1 ++ ", " ++ show v2
 eval2 env (Lam n e) = return $ FunVal env n e
 eval2 env (App e1 e2) = do
   v1 <- eval2 env e1
   v2 <- eval2 env e2
   case v1 of
     (FunVal e' n body) -> eval2 (Map.insert n v2 e') body
-    _ -> throwExcept "not a function"
+    _ -> throwExcept $ "not a function: " ++ show v1

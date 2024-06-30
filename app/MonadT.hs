@@ -3,7 +3,6 @@ module MonadT where
 import Control.Monad (ap)
 import Data.Functor.Classes (Show1 (liftShowsPrec), showsPrec1)
 import GHC.Base (liftM)
-import GHC.IO (catchException)
 
 -- TODO: Could automatically derive Functor, Applicative
 -- with `deriving ... via ...`
@@ -12,19 +11,19 @@ import GHC.IO (catchException)
 --
 -- What is the default implementation of `liftM`?
 --
--- > liftM f m = do
--- >   a <- m
--- >   return (f a)
+-- >>> liftM f m = do
+-- >>>   a <- m
+-- >>>   return (f a)
 --
 -- What about `ap`?
 --
--- > mf `ap` ma = do
--- >   f <- mf
--- >   a <- ma
--- >   return (f a)
+-- >>> mf `ap` ma = do
+-- >>>   f <- mf
+-- >>>   a <- ma
+-- >>>   return (f a)
 
 -- | Identity Monad
---   Used at the bottom of the Monad Tower
+-- Used at the bottom of the Monad Tower
 newtype Identity a = Identity {runIdentity :: a}
 
 instance Show1 Identity where
@@ -45,7 +44,7 @@ instance Monad Identity where
   (Identity a) >>= k = k a
 
 -- | ExceptT Monad Transformer
---   Provides exception handling via `throwExcept` and `catchExcept`.
+-- Provides exception handling via `throwExcept` and `catchExcept`.
 newtype ExceptT e m a = ExceptT {runExceptT :: m (Either e a)}
 
 instance (Show e, Show1 m, Show a) => Show (ExceptT e m a) where
@@ -66,12 +65,19 @@ instance (Monad m) => Monad (ExceptT e m) where
       Left e -> return (Left e)
       Right a -> runExceptT (k a)
 
+-- | Throw an Exception
 throwExcept :: (Monad m) => e -> ExceptT e m a
 throwExcept = ExceptT . return . Left
 
+-- | Catch an Exception
+-- The lhs is the monad so far, the rhs is the exception handler
+-- `h` that takes in the error type `e` and returns a monad.
+--
+-- Note the similarity between `catchExcept` and `>>=`. They are essentially
+-- the same, but `catchExcept` acts on the exception (Left) rather then the 
+-- succesful result (Right).
 catchExcept :: (Monad m) => ExceptT e m a -> (e -> ExceptT e m a) -> ExceptT e m a
 m `catchExcept` h = ExceptT $ do
-  -- think of `h` as the error handler
   x <- runExceptT m
   case x of
     Left e -> runExceptT (h e)
