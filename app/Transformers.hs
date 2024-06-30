@@ -104,6 +104,21 @@ eval3 (Var n) = do
   case Map.lookup n env of
     Nothing -> throwError $ "unbound variable: " ++ n
     Just val -> return val
+eval3 (Add e1 e2) = do
+  v1 <- eval3 e1
+  v2 <- eval3 e2
+  case (v1, v2) of
+    (IntVal i1, IntVal i2) -> return $ IntVal $ i1 + i2
+    _ -> throwError $ "not a number: " ++ show v1 ++ ", " ++ show v2
+eval3 (Lam n e) = do
+  env <- ask
+  return $ FunVal env n e
+eval3 (App e1 e2) = do
+  v1 <- eval3 e1
+  v2 <- eval3 e2
+  case v1 of 
+    (FunVal env n body) -> local (const $ Map.insert n v2 env) (eval3 body)
+    _ -> throwError $ "not a function: " ++ show v1
 
 test :: Either String Value
-test = runEval3 Map.empty $ eval3 lookupExp `catchError` \e -> throwError $ "got error: " ++ e
+test = runEval3 Map.empty $ eval3 errorExp `catchError` \e -> throwError $ "got error: " ++ e

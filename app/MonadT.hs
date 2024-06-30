@@ -1,6 +1,5 @@
 module MonadT where
 
-import Control.Applicative qualified as Map
 import Control.Monad (ap)
 import Data.Functor.Classes (Show1 (liftShowsPrec), showsPrec1)
 import GHC.Base (liftM)
@@ -125,3 +124,9 @@ instance (MonadError e m) => MonadError e (ReaderT r m) where
 -- | Just return the environment itself
 ask :: (Monad m) => ReaderT r m r
 ask = ReaderT $ \r -> return r
+
+-- | "Modify" the environment
+-- the first argument is a function that takes in the environment
+-- and returns a new one.
+local :: (Monad m) => (r -> r) -> ReaderT r m a -> ReaderT r m a
+local f m = ReaderT $ \r -> runReaderT m (f r)
