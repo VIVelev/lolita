@@ -21,8 +21,7 @@ data Value
 
 type Env = Map.Map Name Value
 
--- Base Evaluator (We gotta start from somewhere!)
-
+-- | Base Evaluator (We gotta start from somewhere!)
 eval0 :: Env -> Exp -> Value
 eval0 env (Lit i) = IntVal i
 eval0 env (Var n) = fromJust $ Map.lookup n env
@@ -37,14 +36,16 @@ eval0 env (App e1 e2) =
    in case val1 of
         FunVal env' n body -> eval0 (Map.insert n val2 env') body
 
+lookupExp :: Exp
+lookupExp = Var "x"
+
 exampleExp :: Exp
 exampleExp = Lit 10 `Add` App (Lam "x" (Var "x")) (Lit 4 `Add` Lit 2)
 
 errorExp :: Exp
 errorExp = App (Lit 10) (Lit 12)
 
--- First Evaluator
-
+-- | First Evaluator
 type Eval1 a = Identity a
 
 runEval1 :: Eval1 a -> a
@@ -65,28 +66,44 @@ eval1 env (App e1 e2) = do
   case v1 of
     (FunVal e' n body) -> eval1 (Map.insert n v2 e') body
 
--- Second Evaluator: Exceptions
-
-type Eval2 a = ExceptT String Identity a
+-- | Second Evaluator: Errorions
+type Eval2 a = ErrorT String Identity a
 
 runEval2 :: Eval2 a -> Either String a
-runEval2 = runIdentity . runExceptT
+runEval2 = runIdentity . runErrorT
 
 eval2 :: Env -> Exp -> Eval2 Value
 eval2 env (Lit i) = return $ IntVal i
 eval2 env (Var n) = case Map.lookup n env of
-  Nothing -> throwExcept $ "unbound variable: " ++ n
+  Nothing -> throwError $ "unbound variable: " ++ n
   Just val -> return val
 eval2 env (Add e1 e2) = do
   v1 <- eval2 env e1
   v2 <- eval2 env e2
   case (v1, v2) of
     (IntVal i1, IntVal i2) -> return $ IntVal $ i1 + i2
-    _ -> throwExcept $ "not a number: " ++ show v1 ++ ", " ++ show v2
+    _ -> throwError $ "not a number: " ++ show v1 ++ ", " ++ show v2
 eval2 env (Lam n e) = return $ FunVal env n e
 eval2 env (App e1 e2) = do
   v1 <- eval2 env e1
   v2 <- eval2 env e2
   case v1 of
     (FunVal e' n body) -> eval2 (Map.insert n v2 e') body
-    _ -> throwExcept $ "not a function: " ++ show v1
+    _ -> throwError $ "not a function: " ++ show v1
+
+-- | Third Evaluator: Hiding the environment (Reader Monad)
+type Eval3 a = ReaderT Env (ErrorT String Identity) a
+
+runEval3 :: Env -> Eval3 a -> Either String a
+runEval3 env a = runIdentity . runErrorT $ runReaderT a env
+
+eval3 :: Exp -> Eval3 Value
+eval3 (Lit i) = return $ IntVal i
+eval3 (Var n) = do
+  env <- ask
+  case Map.lookup n env of
+    Nothing -> throwError $ "unbound variable: " ++ n
+    Just val -> return val
+
+test :: Either String Value
+test = runEval3 Map.empty $ eval3 lookupExp `catchError` \e -> throwError $ "got error: " ++ e
