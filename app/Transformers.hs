@@ -1,8 +1,8 @@
 module Transformers where
 
-import MonadT
 import Data.Map qualified as Map
 import Data.Maybe
+import MonadT
 
 type Name = String
 
@@ -21,9 +21,11 @@ data Value
 
 type Env = Map.Map Name Value
 
+-- Base Evaluator (We gotta start from somewhere!)
+
 eval0 :: Env -> Exp -> Value
 eval0 env (Lit i) = IntVal i
-eval0 env (Var n) = fromJust (Map.lookup n env)
+eval0 env (Var n) = fromJust $ Map.lookup n env
 eval0 env (Add e1 e2) =
   let IntVal i1 = eval0 env e1
       IntVal i2 = eval0 env e2
@@ -37,6 +39,7 @@ eval0 env (App e1 e2) =
 
 exampleExp :: Exp
 exampleExp = Lit 10 `Add` App (Lam "x" (Var "x")) (Lit 4 `Add` Lit 2)
+
 errorExp :: Exp
 errorExp = App (Lit 10) (Lit 12)
 
@@ -49,7 +52,7 @@ runEval1 = runIdentity
 
 eval1 :: Env -> Exp -> Eval1 Value
 eval1 env (Lit i) = return $ IntVal i
-eval1 env (Var n) = return $ fromJust $ Map.lookup n env
+eval1 env (Var n) = return . fromJust $ Map.lookup n env
 eval1 env (Add e1 e2) = do
   v1 <- eval1 env e1
   v2 <- eval1 env e2
@@ -62,17 +65,16 @@ eval1 env (App e1 e2) = do
   case v1 of
     (FunVal e' n body) -> eval1 (Map.insert n v2 e') body
 
-
 -- Second Evaluator: Exceptions
 
 type Eval2 a = ExceptT String Identity a
 
 runEval2 :: Eval2 a -> Either String a
-runEval2 m = runIdentity $ runExceptT m
+runEval2 = runIdentity . runExceptT
 
 eval2 :: Env -> Exp -> Eval2 Value
 eval2 env (Lit i) = return $ IntVal i
-eval2 env (Var n) = return $ fromJust $ Map.lookup n env
+eval2 env (Var n) = return . fromJust $ Map.lookup n env
 eval2 env (Add e1 e2) = do
   v1 <- eval2 env e1
   v2 <- eval2 env e2

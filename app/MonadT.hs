@@ -1,8 +1,9 @@
 module MonadT where
 
 import Control.Monad (ap)
-import GHC.Base (liftM)
 import Data.Functor.Classes (Show1 (liftShowsPrec), showsPrec1)
+import GHC.Base (liftM)
+import GHC.IO (catchException)
 
 -- TODO: Could automatically derive Functor, Applicative
 -- with `deriving ... via ...`
@@ -27,10 +28,9 @@ import Data.Functor.Classes (Show1 (liftShowsPrec), showsPrec1)
 newtype Identity a = Identity {runIdentity :: a}
 
 instance Show1 Identity where
-  liftShowsPrec showsPrecA _ p (Identity a) = 
-    showString "Identity " . showParen (p > 10) (showsPrecA 11 a)
+  liftShowsPrec showsPrecA _ _ (Identity a) = showsPrecA 10 a -- Is 10 a hack?
 
-instance Show a => Show (Identity a) where
+instance (Show a) => Show (Identity a) where
   showsPrec = showsPrec1
 
 instance Functor Identity where
@@ -51,7 +51,6 @@ newtype ExceptT e m a = ExceptT {runExceptT :: m (Either e a)}
 instance (Show e, Show1 m, Show a) => Show (ExceptT e m a) where
   show = show . runExceptT
 
--- NOTE: Why is Monad constraint necessary?
 instance (Monad m) => Functor (ExceptT e m) where
   fmap = liftM
 
@@ -69,3 +68,11 @@ instance (Monad m) => Monad (ExceptT e m) where
 
 throwExcept :: (Monad m) => e -> ExceptT e m a
 throwExcept = ExceptT . return . Left
+
+catchExcept :: (Monad m) => ExceptT e m a -> (e -> ExceptT e m a) -> ExceptT e m a
+m `catchExcept` h = ExceptT $ do
+  -- think of `h` as the error handler
+  x <- runExceptT m
+  case x of
+    Left e -> runExceptT (h e)
+    Right a -> return (Right a)
