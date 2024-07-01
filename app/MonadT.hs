@@ -106,7 +106,7 @@ instance (Monad m) => Functor (ReaderT r m) where
   fmap = liftM
 
 instance (Monad m) => Applicative (ReaderT r m) where
-  pure a = ReaderT $ \_ -> return a
+  pure a = ReaderT (return . const a)
   (<*>) = ap
 
 instance (Monad m) => Monad (ReaderT r m) where
@@ -117,16 +117,27 @@ instance (Monad m) => Monad (ReaderT r m) where
     runReaderT (k a) r
 
 instance (MonadError e m) => MonadError e (ReaderT r m) where
-  throwError e = ReaderT $ \_ -> throwError e
+  throwError e = ReaderT (const $ throwError e)
   m `catchError` h = ReaderT $ \r ->
     runReaderT m r `catchError` \e -> runReaderT (h e) r
 
--- | Just return the environment itself
-ask :: (Monad m) => ReaderT r m r
-ask = ReaderT $ \r -> return r
+-- | Monadic Reader
+-- `m` is the monad that implements the rader interface
+-- `r` is the type of the object to be read from; typically
+-- some sort of an environment like `Map String Value`.
+class (Monad m) => MonadReader r m where
+  -- | Just return the environment itself
+  ask :: m r
 
--- | "Modify" the environment
--- the first argument is a function that takes in the environment
--- and returns a new one.
-local :: (Monad m) => (r -> r) -> ReaderT r m a -> ReaderT r m a
-local f m = ReaderT $ \r -> runReaderT m (f r)
+  -- | "Modify" the environment
+  -- the first argument is a function that takes in the environment
+  -- and returns a new one.
+  local :: (r -> r) -> m a -> m a
+
+instance (Monad m) => MonadReader r (ReaderT r m) where
+  ask = ReaderT return
+  local f m = ReaderT (runReaderT m . f)
+
+instance (MonadReader r m) => MonadReader r (ErrorT e m) where
+  ask = ErrorT (Right <$> ask)
+  local f m = ErrorT (local f $ runErrorT m)

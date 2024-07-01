@@ -36,15 +36,6 @@ eval0 env (App e1 e2) =
    in case val1 of
         FunVal env' n body -> eval0 (Map.insert n val2 env') body
 
-lookupExp :: Exp
-lookupExp = Var "x"
-
-exampleExp :: Exp
-exampleExp = Lit 10 `Add` App (Lam "x" (Var "x")) (Lit 4 `Add` Lit 2)
-
-errorExp :: Exp
-errorExp = App (Lit 10) (Lit 12)
-
 -- | First Evaluator
 type Eval1 a = Identity a
 
@@ -92,10 +83,12 @@ eval2 env (App e1 e2) = do
     _ -> throwError $ "not a function: " ++ show v1
 
 -- | Third Evaluator: Hiding the environment (Reader Monad)
-type Eval3 a = ReaderT Env (ErrorT String Identity) a
+-- type Eval3 a = ReaderT Env (ErrorT String Identity) a
+type Eval3 a = ErrorT String (ReaderT Env Identity) a
 
 runEval3 :: Env -> Eval3 a -> Either String a
-runEval3 env a = runIdentity . runErrorT $ runReaderT a env
+-- runEval3 env e = runIdentity . runErrorT $ runReaderT e env
+runEval3 env e = runIdentity $ runReaderT (runErrorT e) env
 
 eval3 :: Exp -> Eval3 Value
 eval3 (Lit i) = return $ IntVal i
@@ -116,9 +109,20 @@ eval3 (Lam n e) = do
 eval3 (App e1 e2) = do
   v1 <- eval3 e1
   v2 <- eval3 e2
-  case v1 of 
+  case v1 of
     (FunVal env n body) -> local (const $ Map.insert n v2 env) (eval3 body)
     _ -> throwError $ "not a function: " ++ show v1
 
-test :: Either String Value
-test = runEval3 Map.empty $ eval3 errorExp `catchError` \e -> throwError $ "got error: " ++ e
+-- Run evaluators
+
+lookupExp :: Exp
+lookupExp = Var "x"
+
+exampleExp :: Exp
+exampleExp = Lit 10 `Add` App (Lam "x" (Var "x")) (Lit 4 `Add` Lit 2)
+
+errorExp :: Exp
+errorExp = App (Lit 10) (Lit 12)
+
+test :: Exp -> Either String Value
+test exp = runEval3 Map.empty $ eval3 exp `catchError` \e -> throwError $ "got error: " ++ e
