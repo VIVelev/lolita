@@ -83,12 +83,12 @@ eval2 env (App e1 e2) = do
     _ -> throwError $ "not a function: " ++ show v1
 
 -- | Third Evaluator: Hiding the environment (Reader Monad)
--- type Eval3 a = ReaderT Env (ErrorT String Identity) a
-type Eval3 a = ErrorT String (ReaderT Env Identity) a
+type Eval3 a = ReaderT Env (ErrorT String Identity) a
+-- type Eval3 a = ErrorT String (ReaderT Env Identity) a
 
 runEval3 :: Env -> Eval3 a -> Either String a
--- runEval3 env e = runIdentity . runErrorT $ runReaderT e env
-runEval3 env e = runIdentity $ runReaderT (runErrorT e) env
+runEval3 env e = runIdentity . runErrorT $ runReaderT e env
+-- runEval3 env e = runIdentity $ runReaderT (runErrorT e) env
 
 eval3 :: Exp -> Eval3 Value
 eval3 (Lit i) = return $ IntVal i

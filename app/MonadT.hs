@@ -60,7 +60,6 @@ instance (Monad m) => Applicative (ErrorT e m) where
 instance (Monad m) => Monad (ErrorT e m) where
   return = pure
   m >>= k = ErrorT $ do
-    -- work on the inner monad
     x <- runErrorT m
     case x of
       Left e -> return (Left e)
@@ -89,7 +88,6 @@ class (Monad m) => MonadError e m where
 instance (Monad m) => MonadError e (ErrorT e m) where
   throwError = ErrorT . return . Left
   m `catchError` h = ErrorT $ do
-    -- work on the inner monad
     x <- runErrorT m
     case x of
       Left e -> runErrorT (h e)
@@ -112,7 +110,6 @@ instance (Monad m) => Applicative (ReaderT r m) where
 instance (Monad m) => Monad (ReaderT r m) where
   return = pure
   m >>= k = ReaderT $ \r -> do
-    -- work on the inner monad
     a <- runReaderT m r
     runReaderT (k a) r
 
