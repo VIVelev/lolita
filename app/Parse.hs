@@ -6,23 +6,43 @@
 --   https://en.wikipedia.org/wiki/Lisp_reader
 module Parse where
 
-import MonadT (ErrorT (runErrorT), Identity (runIdentity), MonadError (..), MonadState (..), StateT (runStateT))
+import Data.String (IsString (fromString))
+import MonadT
+  ( ErrorT (runErrorT),
+    Identity (runIdentity),
+    MonadError (..),
+    MonadState (..),
+    StateT (runStateT),
+  )
 import Text.Printf (printf)
 
 type Error = String
 
-type Stream = String
+-- | The State of the parser
+-- `stream` is what's left of the input
+-- `row` and `col` tell you where the cursor is
+-- (i.e. the next char to be consumed)
+data State = State
+  { stream :: String,
+    row :: Integer,
+    col :: Integer
+  }
+
+instance IsString State where
+  fromString st = State {stream = st, row = 0, col = 0}
 
 -- | Parser type
-type Parser = ErrorT Error (StateT Stream Identity)
+type Parser = ErrorT Error (StateT State Identity)
 
-runParser :: Parser a -> Stream -> Either Error a
+runParser :: Parser a -> State -> Either Error a
 runParser p s = fst $ runIdentity (runStateT (runErrorT p) s)
 
 -- | Alternative
 -- Since we are doing things from scratch...
 class (Applicative f) => Alternative f where
   -- | The identity of `<|>`
+  -- Huh? Elaborating:
+  --   `empty <|> p` and `p` are equivalent
   empty :: f a
 
   -- | If the first one fails, try the second one
@@ -38,32 +58,52 @@ instance Alternative Parser where
   empty = throwError "empty"
   p <|> g = p `catchError` \(_ :: Error) -> g
 
--- | Peek at the next character and return successfully if it satisfies a predicate
+-- | Peek at the next character and return successfully
+-- (consuming the character) if it satisfies a predicate
 satisfy :: (Char -> Bool) -> String -> Parser Char
 satisfy check errorMsg = do
-  s <- get
-  case s of
-    [] -> throwError "end of stream"
+  st <- get
+  case stream st of
+    [] -> throwError (printf "%s, but stream ended prematurely" errorMsg :: Error)
     c : cs
       | check c -> do
-          put cs
+          put $ update st c cs
           return c
-      | otherwise -> throwError (printf "%s, but instead got %c" errorMsg c :: String)
+      | otherwise ->
+          throwError
+            ( printf
+                "%s, but instead got '%c' at row %d, column %d"
+                errorMsg
+                c
+                (row st)
+                (col st) ::
+                Error
+            )
+  where
+    update :: State -> Char -> [Char] -> State
+    update st c cs =
+      let withRest = st {stream = cs}
+       in if c == '\n'
+            then withRest {col = 0, row = row st + 1}
+            else withRest {col = col st + 1}
+
+-- | Run a parser but if it fails revert the state to it's original
+try :: Parser a -> Parser a
+try p = do
+  original :: State <- get
+  p `catchError` \(e :: Error) -> do
+    put original
+    throwError e
 
 char :: Char -> Parser Char
-char c = satisfy (== c) (printf "must equal %c" c)
+char c = satisfy (== c) (printf "expected '%c'" c)
 
 oneOf :: String -> Parser Char
-oneOf cs = satisfy (`elem` cs) (printf "must be one of \"%s\"" cs)
+oneOf cs = satisfy (`elem` cs) (printf "expected one of \"%s\"" cs)
 
 string :: String -> Parser String
 string [] = pure []
 string (c : cs) = (:) <$> char c <*> string cs
-
-parens :: Parser a -> Parser a
-parens parseA = dropFirstAndLast <$> char '(' <*> parseA <*> char ')'
-  where
-    dropFirstAndLast _ a _ = a
 
 -- | Wishful thinking: `SExp` is the output of a lisp reader :)
 data SExp
@@ -73,10 +113,15 @@ data SExp
   deriving (Show)
 
 whitespaces :: Parser String
-whitespaces = many (char ' ')
+whitespaces = many $ oneOf " \n"
 
 allowedAtomChars :: String
 allowedAtomChars = "abcdefghijklmnopqrstuvwxyz"
+
+parens :: Parser a -> Parser a
+parens parseA = dropFirstAndLast <$> char '(' <*> parseA <*> char ')'
+  where
+    dropFirstAndLast _ a _ = a
 
 atom :: Parser SExp
 atom = makeAtom <$> whitespaces <*> some (oneOf allowedAtomChars) <*> whitespaces
@@ -94,4 +139,4 @@ nil = makeNil <$> string "'()"
     makeNil _ = Nil
 
 sexp :: Parser SExp
-sexp = atom <|> pair <|> nil
+sexp = try atom <|> try nil <|> try pair

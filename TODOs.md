@@ -12,6 +12,8 @@
  - [x] Should parse basic pairs, atoms, nulls.
 
 == Jul 2, 2024
+ - [x] Add Monadic State to parser
+ - [ ] Improve errors (i.e. display the row/col where the error occurred)
  - [ ] Parse more complicated structures (i.e. lists)
    - [ ] Figure out an efficient way to parse lists.
      - Ideally we don't rewrite `(a b c)` to `(a . (b . (c . '())))`

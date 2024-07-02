@@ -1,4 +1,4 @@
--- | This is a minimal implementation of mtl style Monad Transformers
+-- | Minimal implementation of mtl style Monad Transformers
 -- Why? Cuz we need to understand stuff from the ground!
 --
 -- References:
