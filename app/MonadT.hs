@@ -1,11 +1,15 @@
+-- | This is a minimal implementation of mtl style Monad Transformers
+-- Why? Cuz we need to understand stuff from the ground!
+--
+-- References:
+--   https://dl.acm.org/doi/pdf/10.1145/143165.143169
+--   https://blogs.asarkar.com/assets/docs/haskell/Monad%20Transformers%20Step%20by%20Step%20-%20Grabmuller.pdf
+--   https://github.com/sdiehl/wiwinwlh
+--   https://github.com/hmemcpy/milewski-ctfp-pdf
 module MonadT where
 
 import Control.Monad (ap)
-import Data.Functor.Classes (Show1 (liftShowsPrec), showsPrec1)
 import GHC.Base (liftM)
-
--- TODO: Could automatically derive Functor, Applicative
--- with `deriving ... via ...`
 
 -- Some notes:
 --
@@ -26,12 +30,6 @@ import GHC.Base (liftM)
 -- Used at the bottom of the Monad Tower
 newtype Identity a = Identity {runIdentity :: a}
 
-instance Show1 Identity where
-  liftShowsPrec showsPrecA _ _ (Identity a) = showsPrecA 10 a -- Is 10 a hack?
-
-instance (Show a) => Show (Identity a) where
-  showsPrec = showsPrec1
-
 instance Functor Identity where
   fmap = liftM
 
@@ -43,12 +41,9 @@ instance Monad Identity where
   return = pure
   (Identity a) >>= k = k a
 
--- | ErrorT Monad Transformer
+-- | Error Monad Transformer
 -- Provides exception handling via `throwError` and `catchError`.
 newtype ErrorT e m a = ErrorT {runErrorT :: m (Either e a)}
-
-instance (Show e, Show1 m, Show a) => Show (ErrorT e m a) where
-  show = show . runErrorT
 
 instance (Monad m) => Functor (ErrorT e m) where
   fmap = liftM
@@ -66,9 +61,8 @@ instance (Monad m) => Monad (ErrorT e m) where
       Right a -> runErrorT (k a)
 
 -- | Monadic Error
--- `e` is the error type
--- `m` is the monad which implements error handling
-class (Monad m) => MonadError e m where
+-- `e` being the error type
+class (Show e, Monad m) => MonadError e m where
   -- | Throw an Error
   -- `a` is usually a type that can hold the error
   -- nested inside, like `Either`.
@@ -85,7 +79,7 @@ class (Monad m) => MonadError e m where
   -- the same one.
   catchError :: m a -> (e -> m a) -> m a
 
-instance (Monad m) => MonadError e (ErrorT e m) where
+instance (Show e, Monad m) => MonadError e (ErrorT e m) where
   throwError = ErrorT . return . Left
   m `catchError` h = ErrorT $ do
     x <- runErrorT m
@@ -93,7 +87,7 @@ instance (Monad m) => MonadError e (ErrorT e m) where
       Left e -> runErrorT (h e)
       Right a -> return (Right a)
 
--- | ReaderT Monad Transformer
+-- | Reader Monad Transformer
 -- Provides an environment capabilities
 -- `r` is the type of the environement
 -- `m` is the type of the underlying monad
@@ -104,7 +98,7 @@ instance (Monad m) => Functor (ReaderT r m) where
   fmap = liftM
 
 instance (Monad m) => Applicative (ReaderT r m) where
-  pure a = ReaderT (return . const a)
+  pure a = ReaderT (pure . const a)
   (<*>) = ap
 
 instance (Monad m) => Monad (ReaderT r m) where
@@ -119,8 +113,7 @@ instance (MonadError e m) => MonadError e (ReaderT r m) where
     runReaderT m r `catchError` \e -> runReaderT (h e) r
 
 -- | Monadic Reader
--- `m` is the monad that implements the rader interface
--- `r` is the type of the object to be read from; typically
+-- `r` being the type of the object to be read from; typically
 -- some sort of an environment like `Map String Value`.
 class (Monad m) => MonadReader r m where
   -- | Just return the environment itself
@@ -138,3 +131,43 @@ instance (Monad m) => MonadReader r (ReaderT r m) where
 instance (MonadReader r m) => MonadReader r (ErrorT e m) where
   ask = ErrorT (Right <$> ask)
   local f m = ErrorT (local f $ runErrorT m)
+
+-- | State Monad Transformer
+-- Provides a read/write state of type `s`
+newtype StateT s m a = StateT {runStateT :: s -> m (a, s)}
+
+instance (Monad m) => Functor (StateT s m) where
+  fmap = liftM
+
+instance (Monad m) => Applicative (StateT s m) where
+  pure a = StateT $ pure . (a,)
+  (<*>) = ap
+
+instance (Monad m) => Monad (StateT s m) where
+  return = pure
+  m >>= k = StateT $ \s -> do
+    (a, s') <- runStateT m s
+    (b, s'') <- runStateT (k a) s'
+    return (b, s'')
+
+-- | Monadic State
+-- `s` being the state type
+class (Monad m) => MonadState s m where
+  -- | Just return the state
+  get :: m s
+
+  -- | Replace the state
+  put :: s -> m ()
+
+instance (Monad m) => MonadState s (StateT s m) where
+  get = StateT $ \s -> pure (s, s)
+  put s = StateT $ \_ -> pure ((), s)
+
+instance (Show e, MonadState s m) => MonadState s (ErrorT e m) where
+  get = ErrorT $ Right <$> get
+  put s = ErrorT $ Right <$> put s
+
+-- TODO: Instances
+--  - [ ] ReaderT of MonadState
+--  - [ ] StateT of MonadReader
+--  - [ ] StateT of MonadError

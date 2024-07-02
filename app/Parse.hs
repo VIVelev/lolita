@@ -1,33 +1,23 @@
-{-# LANGUAGE LambdaCase #-}
-
--- Premature optimization: maybe I should only export some names?
+-- | Parsec like commbinators for a LISP reader.
+--
+-- References:
+--   https://stackoverflow.com/questions/20660782/writing-a-parser-from-scratch-in-haskell
+--   https://hackage.haskell.org/package/parsec
+--   https://en.wikipedia.org/wiki/Lisp_reader
 module Parse where
 
-import MonadT (ErrorT, Identity, MonadError (..))
+import MonadT (ErrorT (runErrorT), Identity (runIdentity), MonadError (..), MonadState (..), StateT (runStateT))
+import Text.Printf (printf)
 
 type Error = String
 
 type Stream = String
 
 -- | Parser type
--- Think of a parser as function that takes in the stream,
--- consumes enough to produce a value of type `a` and returns
--- the rest of the stream with the production; or, it fails.
-newtype Parser a = Parser {runParser :: Stream -> ErrorT Error Identity (Stream, a)}
+type Parser = ErrorT Error (StateT Stream Identity)
 
---                                                             ^ this is a bit ugly
-
-instance Functor Parser where
-  fmap f (Parser p) = Parser $ \s -> do
-    (s', a) <- p s
-    return (s', f a)
-
-instance Applicative Parser where
-  pure a = Parser (\s -> return (s, a))
-  Parser ff <*> Parser aa = Parser $ \s -> do
-    (s', f) <- ff s
-    (s'', a) <- aa s'
-    return (s'', f a)
+runParser :: Parser a -> Stream -> Either Error a
+runParser p s = fst $ runIdentity (runStateT (runErrorT p) s)
 
 -- | Alternative
 -- Since we are doing things from scratch...
@@ -45,23 +35,26 @@ class (Applicative f) => Alternative f where
   many v = some v <|> pure []
 
 instance Alternative Parser where
-  empty = Parser $ \_ -> throwError "empty"
-  (Parser p) <|> (Parser g) = Parser $ \s ->
-    p s `catchError` \(_ :: Error) -> g s
+  empty = throwError "empty"
+  p <|> g = p `catchError` \(_ :: Error) -> g
 
 -- | Peek at the next character and return successfully if it satisfies a predicate
-satisfy :: (Char -> Bool) -> Parser Char
-satisfy check = Parser $ \case
-  [] -> throwError "end of stream"
-  c : cs
-    | check c -> return (cs, c)
-    | otherwise -> throwError $ "did not satisfy, got " ++ show c
+satisfy :: (Char -> Bool) -> String -> Parser Char
+satisfy check errorMsg = do
+  s <- get
+  case s of
+    [] -> throwError "end of stream"
+    c : cs
+      | check c -> do
+          put cs
+          return c
+      | otherwise -> throwError (printf "%s, but instead got %c" errorMsg c :: String)
 
 char :: Char -> Parser Char
-char c = satisfy (== c)
+char c = satisfy (== c) (printf "must equal %c" c)
 
 oneOf :: String -> Parser Char
-oneOf cs = satisfy (`elem` cs)
+oneOf cs = satisfy (`elem` cs) (printf "must be one of \"%s\"" cs)
 
 string :: String -> Parser String
 string [] = pure []
