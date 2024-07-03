@@ -35,7 +35,12 @@ instance IsString State where
 type Parser = ErrorT Error (StateT State Identity)
 
 runParser :: Parser a -> State -> Either Error a
-runParser p s = fst $ runIdentity (runStateT (runErrorT p) s)
+runParser p st =
+  if not . null $ stream st'
+    then Left (printf "unexpected symbols at row %d, col %d" (row st') (col st'))
+    else a
+  where
+    (a, st') = runIdentity (runStateT (runErrorT p) st)
 
 -- | Alternative
 -- Since we are doing things from scratch...
@@ -110,33 +115,36 @@ data SExp
   = Atom String
   | Pair {car :: SExp, cdr :: SExp}
   | Nil
-  deriving (Show)
+  deriving (Show, Eq)
 
-whitespaces :: Parser String
-whitespaces = many $ oneOf " \n"
+-- | Whitespaces
+ws :: Parser String
+ws = many $ oneOf " \n"
 
 allowedAtomChars :: String
 allowedAtomChars = "abcdefghijklmnopqrstuvwxyz"
 
 parens :: Parser a -> Parser a
-parens parseA = dropFirstAndLast <$> char '(' <*> parseA <*> char ')'
-  where
-    dropFirstAndLast _ a _ = a
+parens parseA = ws *> char '(' *> ws *> parseA <* ws <* char ')' <* ws
 
+-- | Atom
 atom :: Parser SExp
-atom = makeAtom <$> whitespaces <*> some (oneOf allowedAtomChars) <*> whitespaces
-  where
-    makeAtom _ a _ = Atom a
+atom = Atom <$> (ws *> some (oneOf allowedAtomChars) <* ws)
 
+-- Pair
 pair :: Parser SExp
-pair = parens $ makePair <$> sexp <*> whitespaces <*> char '.' <*> whitespaces <*> sexp
-  where
-    makePair car _ _ _ cdr = Pair {car = car, cdr = cdr}
+pair = parens $ Pair <$> sexp <* ws <* char '.' <* ws <*> sexp
 
+-- | Nil
 nil :: Parser SExp
-nil = makeNil <$> string "'()"
-  where
-    makeNil _ = Nil
+nil = Nil <$ (ws *> string "'()" <* ws)
+
+-- | LISP list constructor, i.e. (x ...)
+-- Should satisfy: (a b c) is equivalent to (a . (b . (c . '())))
+list :: Parser SExp
+list = parens $ do
+  elements <- some (ws *> sexp <* ws)
+  return $ foldr Pair Nil elements
 
 sexp :: Parser SExp
-sexp = try atom <|> try nil <|> try pair
+sexp = try atom <|> try nil <|> try pair <|> try list

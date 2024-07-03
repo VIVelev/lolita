@@ -8,21 +8,33 @@ maintainer:    vivelev@icloud.com
 category:      Language
 
 build-type:         Simple
-extra-doc-files:    CHANGELOG.md
 
 common warnings
     ghc-options: -Wall
 
-test-suite test
-    type:          exitcode-stdio-1.0
-    main-is:       test.hs
-    build-depends: base
+test-suite main
+  type:                exitcode-stdio-1.0
+  hs-source-dirs:      test
+  main-is:             Main.hs
+  other-modules:       ParseTest
+  build-depends:       base,
+                       lolita,
+                       HUnit
+  default-language:    GHC2021
+
+library
+    import:           warnings
+    hs-source-dirs:   src
+    exposed-modules:  Parse
+    other-modules:    MonadT
+    build-depends:    base,
+    default-language: GHC2021
 
 executable lolita
     import:           warnings
+    hs-source-dirs:   src
     main-is:          Main.hs
     other-modules:    Parse, Eval, MonadT
     build-depends:    base,
                       containers,
-    hs-source-dirs:   app
     default-language: GHC2021
