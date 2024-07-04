@@ -60,7 +60,7 @@ class (Applicative f) => Alternative f where
   many v = some v <|> pure []
 
 instance Alternative Parser where
-  empty = throwError "empty"
+  empty = throwError "something went horribly wrong :)"
   p <|> g = p `catchError` \(_ :: Error) -> g
 
 -- | Peek at the next character and return successfully
@@ -96,9 +96,9 @@ satisfy check errorMsg = do
 try :: Parser a -> Parser a
 try p = do
   original :: State <- get
-  p `catchError` \(e :: Error) -> do
+  p `catchError` \(_ :: Error) -> do
     put original
-    throwError e
+    empty
 
 char :: Char -> Parser Char
 char c = satisfy (== c) (printf "expected '%c'" c)
@@ -112,24 +112,50 @@ string (c : cs) = (:) <$> char c <*> string cs
 
 -- | Wishful thinking: `SExp` is the output of a lisp reader :)
 data SExp
-  = Atom String
+  = Atom AKind
   | Pair {car :: SExp, cdr :: SExp}
   | Nil
+  deriving (Show, Eq)
+
+-- | Atomic kinds
+data AKind
+  = Symbol String
+  | IntLiteral Integer
+  | BoolLiteral Bool
   deriving (Show, Eq)
 
 -- | Whitespaces
 ws :: Parser String
 ws = many $ oneOf " \n"
 
-allowedAtomChars :: String
-allowedAtomChars = "abcdefghijklmnopqrstuvwxyz"
+digits :: String
+digits = "0123456789"
+
+alphabet :: String
+alphabet = "abcdefghijklmnopqrstuvwxyz"
+
+misc :: String
+misc = "-?=*"
 
 parens :: Parser a -> Parser a
 parens parseA = ws *> char '(' *> ws *> parseA <* ws <* char ')' <* ws
 
+integer :: Parser AKind
+integer = toInt <$> (ws *> try negative <|> try positive <* ws)
+  where negative = (:) <$> char '-' <*> positive
+        positive = some (oneOf digits)
+        toInt = IntLiteral . read
+
+boolean :: Parser AKind
+boolean = toBool <$> (ws *> try (char 'T') <|> try (char 'F') <* ws)
+  where toBool = BoolLiteral . (== 'T')
+
+symbol :: Parser AKind
+symbol = Symbol <$> (ws *> some (oneOf $ alphabet ++ digits ++ misc) <* ws)
+
 -- | Atom
 atom :: Parser SExp
-atom = Atom <$> (ws *> some (oneOf allowedAtomChars) <* ws)
+atom = Atom <$> try integer <|> try boolean <|> try symbol
 
 -- Pair
 pair :: Parser SExp
@@ -147,4 +173,9 @@ list = parens $ do
   return $ foldr Pair Nil elements
 
 sexp :: Parser SExp
-sexp = try atom <|> try nil <|> try pair <|> try list
+sexp = try atom <|> try nil <|> try pair <|> list
+
+-- Otherthings to support:
+--   - [ ] `'x` should be read as `(quote x)`
+--   - [ ] If I feel fancy, should support splatting `,@`
+--   - [ ] Well, if we support splatting, why not backquotes too!

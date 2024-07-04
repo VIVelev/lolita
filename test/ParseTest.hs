@@ -25,38 +25,85 @@ isLeft (Right _) = False
 testCases :: Test
 testCases = TestList [
   -- Successful cases
-  testCase "Simple atom" (Right (Atom "abc")) (fromString "abc"),
-  testCase "Simple pair" (Right (Pair (Atom "a") (Atom "b"))) (fromString "(a . b)"),
+  testCase "Simple atom (symbol)" (Right (Atom (Symbol "abc"))) (fromString "abc"),
+  testCase "Simple atom (integer)" (Right (Atom (IntLiteral 123))) (fromString "123"),
+  testCase "Simple atom (boolean true)" (Right (Atom (BoolLiteral True))) (fromString "T"),
+  testCase "Simple atom (boolean false)" (Right (Atom (BoolLiteral False))) (fromString "F"),
+  testCase "Simple pair" (Right (Pair (Atom (Symbol "a")) (Atom (Symbol "b")))) (fromString "(a . b)"),
   testCase "Simple list" 
-    (Right (Pair (Atom "a") (Pair (Atom "b") (Pair (Atom "c") Nil))))
+    (Right (Pair (Atom (Symbol "a")) (Pair (Atom (Symbol "b")) (Pair (Atom (Symbol "c")) Nil))))
     (fromString "(a b c)"),
   testCase "Nested list" 
-    (Right (Pair (Atom "a") (Pair (Pair (Atom "b") (Pair (Atom "c") Nil)) Nil)))
+    (Right (Pair (Atom (Symbol "a")) (Pair (Pair (Atom (Symbol "b")) (Pair (Atom (Symbol "c")) Nil)) Nil)))
     (fromString "(a (b c))"),
   testCase "Complex nested list"
-    (Right (Pair (Atom "a") 
-      (Pair (Pair (Atom "b") (Pair (Atom "c") Nil)) 
-        (Pair (Atom "d") 
-          (Pair (Pair (Atom "e") 
-            (Pair (Pair (Atom "f") (Pair (Atom "g") Nil)) Nil)) Nil)))))
+    (Right (Pair (Atom (Symbol "a")) 
+      (Pair (Pair (Atom (Symbol "b")) (Pair (Atom (Symbol "c")) Nil)) 
+        (Pair (Atom (Symbol "d")) 
+          (Pair (Pair (Atom (Symbol "e")) 
+            (Pair (Pair (Atom (Symbol "f")) (Pair (Atom (Symbol "g")) Nil)) Nil)) Nil)))))
     (fromString "(a (b c) d (e (f g)))"),
   testCase "List with nil"
-    (Right (Pair (Atom "a") (Pair (Atom "b") (Pair Nil Nil))))
+    (Right (Pair (Atom (Symbol "a")) (Pair (Atom (Symbol "b")) (Pair Nil Nil))))
     (fromString "(a b '())"),
   testCase "Whitespace handling"
-    (Right (Pair (Atom "a") (Pair (Atom "b") Nil)))
+    (Right (Pair (Atom (Symbol "a")) (Pair (Atom (Symbol "b")) Nil)))
     (fromString "  (  a  b  )  "),
   testCase "Empty nested list"
-    (Right (Pair (Atom "a") (Pair Nil (Pair (Atom "b") Nil))))
+    (Right (Pair (Atom (Symbol "a")) (Pair Nil (Pair (Atom (Symbol "b")) Nil))))
     (fromString "(a '() b)"),
   testCase "Multiple nested lists"
     (Right (Pair 
-      (Pair (Atom "a") (Pair (Atom "b") Nil)) 
-      (Pair (Pair (Atom "c") (Pair (Atom "d") Nil)) Nil)))
+      (Pair (Atom (Symbol "a")) (Pair (Atom (Symbol "b")) Nil)) 
+      (Pair (Pair (Atom (Symbol "c")) (Pair (Atom (Symbol "d")) Nil)) Nil)))
     (fromString "((a b) (c d))"),
   testCase "List with multiple nils"
-    (Right (Pair (Atom "a") (Pair Nil (Pair (Atom "b") (Pair Nil (Pair (Atom "c") Nil))))))
+    (Right (Pair (Atom (Symbol "a")) (Pair Nil (Pair (Atom (Symbol "b")) (Pair Nil (Pair (Atom (Symbol "c")) Nil))))))
     (fromString "(a '() b '() c)"),
+  testCase "List with mixed types"
+    (Right (Pair (Atom (Symbol "a")) (Pair (Atom (IntLiteral 123)) (Pair (Atom (BoolLiteral True)) Nil))))
+    (fromString "(a 123 T)"),
+  testCase "Large integer" (Right (Atom (IntLiteral 1234567890))) (fromString "1234567890"),
+  testCase "Negative integer" (Right (Atom (IntLiteral (-42)))) (fromString "-42"),
+  testCase "Symbol with digits" (Right (Atom (Symbol "x123"))) (fromString "x123"),
+  testCase "Symbol with hyphens" (Right (Atom (Symbol "hello-world"))) (fromString "hello-world"),
+  testCase "Nested pair" 
+    (Right (Pair (Atom (Symbol "a")) (Pair (Atom (Symbol "b")) (Pair (Atom (Symbol "c")) (Atom (Symbol "d"))))))
+    (fromString "(a . (b . (c . d)))"),
+  testCase "List with nested pairs"
+    (Right (Pair (Atom (Symbol "a")) (Pair (Pair (Atom (Symbol "b")) (Atom (Symbol "c"))) (Pair (Atom (Symbol "d")) Nil))))
+    (fromString "(a (b . c) d)"),
+  testCase "Complex expression with all types"
+    (Right (Pair (Atom (Symbol "define"))
+             (Pair (Atom (Symbol "factorial"))
+               (Pair
+                 (Pair (Atom (Symbol "lambda"))
+                   (Pair (Pair (Atom (Symbol "n")) Nil)
+                     (Pair
+                       (Pair (Atom (Symbol "if"))
+                         (Pair
+                           (Pair (Atom (Symbol "="))
+                             (Pair (Atom (Symbol "n"))
+                               (Pair (Atom (IntLiteral 0))
+                            Nil)))
+                            (Pair (Atom (IntLiteral 1))
+                              (Pair
+                                (Pair (Atom (Symbol "*"))
+                                  (Pair (Atom (Symbol "n"))
+                                    (Pair
+                                      (Pair (Atom (Symbol "factorial"))
+                                        (Pair
+                                          (Pair (Atom (Symbol "-"))
+                                            (Pair (Atom (Symbol "n"))
+                                              (Pair (Atom (IntLiteral 1))
+                                           Nil)))
+                                       Nil))
+                                 Nil)))
+                        Nil))))
+                  Nil)))
+            Nil)))
+    )
+    (fromString "(define factorial (lambda (n) (if (= n 0) 1 (* n (factorial (- n 1))))))"),
 
   -- Failure cases
   assertParserFails "Empty list" (fromString "()"),
@@ -65,7 +112,12 @@ testCases = TestList [
   assertParserFails "Invalid character in atom" (fromString "ab@c"),
   assertParserFails "Empty input" (fromString ""),
   assertParserFails "Misplaced dot" (fromString "(a . b . c)"),
-  assertParserFails "Incomplete pair" (fromString "(a .)")
+  assertParserFails "Incomplete pair" (fromString "(a .)"),
+  assertParserFails "Invalid boolean" (fromString "True"),
+  assertParserFails "Invalid integer" (fromString "12a34"),
+  assertParserFails "Misplaced nil" (fromString "(a b '() . c)"),
+  assertParserFails "Incomplete list" (fromString "(a b (c d)"),
+  assertParserFails "Extra closing parenthesis" (fromString "(a b) c)")
   ]
 {- ORMOLU_ENABLE -}
 

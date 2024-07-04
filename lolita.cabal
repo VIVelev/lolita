@@ -26,8 +26,9 @@ library
     import:           warnings
     hs-source-dirs:   src
     exposed-modules:  Parse
-    other-modules:    MonadT
+    other-modules:    Eval, MonadT
     build-depends:    base,
+                      containers,
     default-language: GHC2021
 
 executable lolita
