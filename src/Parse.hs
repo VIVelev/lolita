@@ -60,7 +60,7 @@ class (Applicative f) => Alternative f where
   many v = some v <|> pure []
 
 instance Alternative Parser where
-  empty = throwError "something went horribly wrong :)"
+  empty = throwError "something went horribly wrong (:"
   p <|> g = p `catchError` \(_ :: Error) -> g
 
 -- | Peek at the next character and return successfully
@@ -117,6 +117,18 @@ data SExp
   | Nil
   deriving (Show, Eq)
 
+cddr :: SExp -> SExp
+cddr = cdr . cdr
+
+cadr :: SExp -> SExp
+cadr = car . cdr
+
+caddr :: SExp -> SExp
+caddr = car . cdr . cdr
+
+cadddr :: SExp -> SExp
+cadddr = car . cdr . cdr . cdr
+
 -- | Atomic kinds
 data AKind
   = Symbol String
@@ -135,20 +147,22 @@ alphabet :: String
 alphabet = "abcdefghijklmnopqrstuvwxyz"
 
 misc :: String
-misc = "-?=*"
+misc = "-?=*+"
 
 parens :: Parser a -> Parser a
 parens parseA = ws *> char '(' *> ws *> parseA <* ws <* char ')' <* ws
 
 integer :: Parser AKind
 integer = toInt <$> (ws *> try negative <|> try positive <* ws)
-  where negative = (:) <$> char '-' <*> positive
-        positive = some (oneOf digits)
-        toInt = IntLiteral . read
+  where
+    negative = (:) <$> char '-' <*> positive
+    positive = some (oneOf digits)
+    toInt = IntLiteral . read
 
 boolean :: Parser AKind
 boolean = toBool <$> (ws *> try (char 'T') <|> try (char 'F') <* ws)
-  where toBool = BoolLiteral . (== 'T')
+  where
+    toBool = BoolLiteral . (== 'T')
 
 symbol :: Parser AKind
 symbol = Symbol <$> (ws *> some (oneOf $ alphabet ++ digits ++ misc) <* ws)
