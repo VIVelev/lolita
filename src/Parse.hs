@@ -129,6 +129,10 @@ caddr = car . cdr . cdr
 cadddr :: SExp -> SExp
 cadddr = car . cdr . cdr . cdr
 
+listify :: SExp -> [SExp]
+listify (Pair car cdr) = car : listify cdr
+listify Nil = []
+
 -- | Atomic kinds
 data AKind
   = Symbol String

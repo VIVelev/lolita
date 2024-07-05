@@ -116,12 +116,10 @@ instance (MonadError e m) => MonadError e (ReaderT r m) where
 -- `r` being the type of the object to be read from; typically
 -- some sort of an environment like `Map String Value`.
 class (Monad m) => MonadReader r m where
-  -- | Just return the environment itself
+  -- | Retrieves the monad environment.
   ask :: m r
 
-  -- | "Modify" the environment
-  -- the first argument is a function that takes in the environment
-  -- and returns a new one.
+  -- | Executes a computation in a modified environment.
   local :: (r -> r) -> m a -> m a
 
 instance (Monad m) => MonadReader r (ReaderT r m) where
@@ -158,6 +156,26 @@ class (Monad m) => MonadState s m where
 
   -- | Replace the state
   put :: s -> m ()
+
+  -- | Maps an old state to a new state inside a state monad.
+  -- The old state is thrown away.
+  modify :: (s -> s) -> m ()
+  modify f = do
+    s <- get
+    put (f s)
+
+  -- TODO: Could this be avoided by combining ReaderT and StateT
+  -- in a clever way?
+  --
+  -- | Executes a computation in a modified state. Once
+  -- the computation is done, the state is restored.
+  localState :: (s -> s) -> m a -> m a
+  localState f m = do
+    original <- get
+    put (f original)
+    res <- m
+    put original
+    return res
 
 instance (Monad m) => MonadState s (StateT s m) where
   get = StateT $ \s -> pure (s, s)
