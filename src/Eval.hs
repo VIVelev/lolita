@@ -1,3 +1,5 @@
+{-# LANGUAGE LambdaCase #-}
+
 -- | A Tower of Evaluators LISP interpreter.
 --
 -- Reference:
@@ -14,14 +16,6 @@ import MonadT
     StateT (..),
   )
 import Parse qualified as P
-  ( AKind (..),
-    SExp (..),
-    cadddr,
-    caddr,
-    cadr,
-    cddr,
-    listify,
-  )
 
 type Error = String
 
@@ -78,9 +72,10 @@ data Program
       { vars :: [Variable],
         body :: Program
       }
-  | -- | this is a special case
+  | -- | This is a special case, as you may guess from the name.
     Magic Keyword
-  | Quote P.SExp
+  | -- | Quoting is vital for a language to support macros.
+    Quote P.SExp
   deriving (Show, Eq)
 
 evaluate :: Program -> Evaluate P.SExp
@@ -138,11 +133,10 @@ if_ :: Keyword
 if_ =
   Keyword
     { symbol = "if",
-      handler = \e ->
-        let condition = objectify $ P.cadr e
-            consequent = objectify $ P.caddr e
-            alternate = objectify $ P.cadddr e
-         in Altarnative <$> condition <*> consequent <*> alternate
+      handler = \case
+        P.Pair _ (P.Pair ce (P.Pair te (P.Pair fe P.Nil))) ->
+          Altarnative <$> objectify ce <*> objectify te <*> objectify fe
+        _ -> throwError "Invalid if syntax"
     }
 
 -- | Objectifies a sequence of expressions
@@ -151,12 +145,14 @@ if_ =
 -- It returns a Sequence.
 objectifySequence :: P.SExp -> Objectify Program
 objectifySequence e =
-  let es = P.listify e
-   in Sequence . reverse
+  case P.listify e of
+    Right es ->
+      Sequence . reverse
         <$> foldl
           (\b a -> (:) <$> ((head <$> b) >> objectify a) <*> b)
           ((:) <$> objectify (head es) <*> pure [])
           (tail es)
+    Left err -> throwError err
 
 -- | Given s-expressions `(v1 v2 v3 ...)` and `(e1 e2 e3 ...)`
 -- it returns the program `(begin e1 e2 e3)`, so that the program
@@ -170,7 +166,7 @@ objectifyWithScope rawVars rawBody =
         case varsOrErr of
           Left err -> throwError err
           Right vars -> do
-            body <- localState (extendEnv vars) (objectifySequence rawBody)
+            body <- locally (extendEnv vars) (objectifySequence rawBody)
             return $ Function vars body
   where
     variableList (P.Pair (P.Atom (P.Symbol name)) cdr) =
@@ -184,13 +180,13 @@ lambda :: Keyword
 lambda =
   Keyword
     { symbol = "lambda",
-      handler = \e ->
-        let vars = P.cadr e
-            body = P.cddr e
-         in objectifyWithScope vars body
+      handler = \case
+        P.Pair _ (P.Pair (P.Pair _ vars) body) ->
+          objectifyWithScope vars body
+        _ -> throwError "Invalid lambda syntax"
     }
 
--- | (begin (begin ...)
+-- | (begin ...)
 begin :: Keyword
 begin =
   Keyword
@@ -212,30 +208,38 @@ defmacro :: Keyword
 defmacro =
   Keyword
     { symbol = "defmacro",
-      handler = \e ->
-        let call = P.cadr e
-            P.Atom (P.Symbol name) = P.car call
-            vars = P.cdr call
-            body = P.cddr e
-            Right expanderProgam = runObjectify (objectifyWithScope vars body) defaultPrepEnv
-            -- \^ this is a Function Program
-            -- Now, the handler invokes this function with the arguments supplied
-            newKeyword = Keyword {symbol = name, handler = objectify . invoke expanderProgam . P.cdr}
-            defmacroReturnValue = BoolLiteral True -- the expression `(defmacro ...)` has to return something
-         in do
-              modify (\r@PrepEnv {keywords} -> r {keywords = (name, newKeyword) : keywords})
-              return defmacroReturnValue
+      handler = \case
+        P.Pair _ (P.Pair call body) ->
+          case call of
+            P.Pair (P.Atom (P.Symbol name)) vars -> do
+              case runObjectify (objectifyWithScope vars body) defaultPrepEnv of
+                Left err -> throwError $ "Error in macro definition: " ++ err
+                Right expanderProgram ->
+                  let newKeyword = Keyword {symbol = name, handler = invoke expanderProgram . P.cdr}
+                   in withState
+                        (\r@PrepEnv {keywords} -> r {keywords = (name, newKeyword) : keywords})
+                        (pure $ BoolLiteral True)
+            _ -> throwError "Invalid macro name: expected a symbol"
+        _ -> throwError "Invalid defmacro syntax: expected (defmacro (name <variables>) <body>)"
     }
-  where
-    invoke (Function vars body) (args :: P.SExp) =
-      let Right res =
-            runEvaluate
-              ( local
-                  (\r -> zip vars (P.listify args) ++ r)
-                  (evaluate body)
-              )
-              defaultRunTimeEnv
-       in res
+
+invoke :: Program -> P.SExp -> Objectify Program
+invoke (Function vars body) args =
+  case P.listify args of
+    Right argList
+      | length argList == length vars -> do
+          let env = zip vars argList
+          case runEvaluate (local (<> env) (evaluate body)) defaultRunTimeEnv of
+            Left err -> throwError $ "Error in macro expansion: " ++ err
+            Right res -> objectify res
+      | otherwise ->
+          throwError $
+            "Macro invocation error: expected "
+              ++ show (length vars)
+              ++ " arguments, but got "
+              ++ show (length (P.listify args))
+    Left e -> throwError e
+invoke _ _ = throwError "Internal error: expected a Function in macro invocation"
 
 defaultPrepEnv :: PrepEnv
 defaultPrepEnv =

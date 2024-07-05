@@ -115,7 +115,12 @@ data SExp
   = Atom AKind
   | Pair {car :: SExp, cdr :: SExp}
   | Nil
-  deriving (Show, Eq)
+  deriving (Eq)
+
+instance Show SExp where
+  show (Atom a) = show a
+  show (Pair car cdr) = "(" ++ show car ++ " . " ++ show cdr ++ ")"
+  show Nil = "Nil"
 
 cddr :: SExp -> SExp
 cddr = cdr . cdr
@@ -129,16 +134,22 @@ caddr = car . cdr . cdr
 cadddr :: SExp -> SExp
 cadddr = car . cdr . cdr . cdr
 
-listify :: SExp -> [SExp]
-listify (Pair car cdr) = car : listify cdr
-listify Nil = []
+listify :: SExp -> Either Error [SExp]
+listify (Pair car cdr) = (:) <$> Right car <*> listify cdr
+listify Nil = Right []
+listify e = Left $ "S-expression is not a valid list: " ++ show e
 
 -- | Atomic kinds
 data AKind
   = Symbol String
   | IntLiteral Integer
   | BoolLiteral Bool
-  deriving (Show, Eq)
+  deriving (Eq)
+
+instance Show AKind where
+  show (Symbol n) = n
+  show (IntLiteral i) = show i
+  show (BoolLiteral b) = show b
 
 -- | Whitespaces
 ws :: Parser String

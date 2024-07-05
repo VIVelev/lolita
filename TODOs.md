@@ -21,16 +21,25 @@
 
 ## Jul 3, 2024
  - [x] Parse atomic literals
- - [ ] Introduce the basic AST structure, this will look like the objectification
-   algorithm from LiSP.
-     - [ ] The question here is, how to model the inheritance structure? Solve that!
- - [ ] Make a simple objectifier.
- - [ ] Structure an environment
- - [ ] Using the objectifier, make a simple evaluator
 
 ## Jul 4, 2024
+ - [x] Introduce the basic AST structure, this will look like the objectification
+   algorithm from LiSP.
+     - [x] The question here is, how to model the inheritance structure? Solve that!
+ - [x] Make a simple objectifier.
+ - [x] Structure an environment
+ - [x] Using the objectifier, make a simple evaluator
 
+## Jul 5, 2024
+ - [x] A simple version of `defmacro`
+ - [x] Refactor
+   - [x] Is there a way to combine `ReaderT` and `StateT` nicely for the objectifier?
+ - [ ] Test defmacro
+ - [ ] Add read script from file functionality
+
+## Jul 6, 2024
  - [ ] Add assignments
+ - [ ] Handle function applications
 
 ## Long term
 

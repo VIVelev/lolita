@@ -160,17 +160,15 @@ class (Monad m) => MonadState s m where
   -- | Maps an old state to a new state inside a state monad.
   -- The old state is thrown away.
   modify :: (s -> s) -> m ()
-  modify f = do
-    s <- get
-    put (f s)
+  modify f = get >>= put . f
 
-  -- TODO: Could this be avoided by combining ReaderT and StateT
-  -- in a clever way?
-  --
+  withState :: (s -> s) -> m a -> m a
+  withState f m = modify f >> m
+
   -- | Executes a computation in a modified state. Once
   -- the computation is done, the state is restored.
-  localState :: (s -> s) -> m a -> m a
-  localState f m = do
+  locally :: (s -> s) -> m a -> m a
+  locally f m = do
     original <- get
     put (f original)
     res <- m
@@ -180,6 +178,11 @@ class (Monad m) => MonadState s m where
 instance (Monad m) => MonadState s (StateT s m) where
   get = StateT $ \s -> pure (s, s)
   put s = StateT $ \_ -> pure ((), s)
+
+  -- \| Direct implementation of locally.
+  locally f m = StateT $ \s -> do
+    (a, _) <- runStateT m (f s)
+    return (a, s)
 
 instance (Show e, MonadState s m) => MonadState s (ErrorT e m) where
   get = ErrorT $ Right <$> get
