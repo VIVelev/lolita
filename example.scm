@@ -1,5 +1,4 @@
-(+ 1 x)
+(defmacro (hello x)
+  (quote no-hello))
 
-(if T 1 2)
-
-(lambda (1 2 3))
+(hello "Vici")
