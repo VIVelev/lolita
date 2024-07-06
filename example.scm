@@ -5,3 +5,7 @@
 
 (define (fact)
   (hello x))
+
+(begin 1 2 3)
+
+(begin . (1 . (2 . (3 '()))))

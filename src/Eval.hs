@@ -160,19 +160,19 @@ objectifySequence e =
 --
 -- It returns a Function.
 objectifyWithScope :: P.SExp -> P.SExp -> Objectify Program
-objectifyWithScope rawVars rawBody =
-  let varsOrErr = variableList rawVars
-   in do
-        case varsOrErr of
-          Left err -> throwError err
-          Right vars -> do
-            body <- locally (extendEnv vars) (objectifySequence rawBody)
-            return $ Function vars body
+objectifyWithScope varsExp bodyExp =
+  case P.listify varsExp of
+    Left err -> throwError err
+    Right list -> case toVariables list of
+      Left err -> throwError err
+      Right vars -> do
+        body <- locally (extendEnv vars) (objectifySequence bodyExp)
+        return $ Function vars body
   where
-    variableList (P.Pair (P.Atom (P.Symbol name)) cdr) =
-      (:) (LocalVariable name False False) <$> variableList cdr
-    variableList P.Nil = Right []
-    variableList _ = Left "only symbols are allowed as lambda variables"
+    toVariables ((P.Atom (P.Symbol name)) : xs) =
+      (:) (LocalVariable name False False) <$> toVariables xs
+    toVariables [] = Right []
+    toVariables _ = Left "Invalid argument list, only symbols are allowed as lambda variables"
     extendEnv vars r@PrepEnv {variables} = r {variables = map (\x -> (name x, x)) vars <> variables}
 
 -- | (lambda (<names> ...) body)
@@ -181,7 +181,7 @@ lambda =
   Keyword
     { symbol = "lambda",
       handler = \case
-        P.Pair _ (P.Pair (P.Pair _ vars) body) ->
+        P.Pair _ (P.Pair vars body) ->
           objectifyWithScope vars body
         _ -> throwError "Invalid lambda syntax"
     }

@@ -118,9 +118,13 @@ data SExp
   deriving (Eq)
 
 instance Show SExp where
-  show (Atom a) = show a
-  show (Pair car cdr) = "(" ++ show car ++ " . " ++ show cdr ++ ")"
-  show Nil = "Nil"
+  show e = case listify e of
+    Right (x : xs) -> "(" ++ foldl (\b a -> b ++ " " ++ show a) (show x) xs ++ ")"
+    Left _ -> case e of
+      Atom a -> show a
+      Pair car cdr -> "(" ++ show car ++ " . " ++ show cdr ++ ")"
+      Nil -> ""
+    Right [] -> show Nil
 
 cddr :: SExp -> SExp
 cddr = cdr . cdr

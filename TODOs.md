@@ -34,10 +34,12 @@
  - [x] A simple version of `defmacro`
  - [x] Refactor
    - [x] Is there a way to combine `ReaderT` and `StateT` nicely for the objectifier?
- - [ ] Test defmacro
+ - [x] Pretty print `SExp`
  - [ ] Add read script from file functionality
 
 ## Jul 6, 2024
+ - [ ] It's hight time I support backquotes.
+ - [ ] Test defmacro
  - [ ] Add assignments
  - [ ] Handle function applications
 
