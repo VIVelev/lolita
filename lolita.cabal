@@ -19,7 +19,7 @@ test-suite main
   other-modules:       ParseTest
   build-depends:       base,
                        lolita,
-                       HUnit
+                       HUnit,
   default-language:    GHC2021
 
 library
