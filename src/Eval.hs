@@ -42,7 +42,7 @@ data Keyword = Keyword
   }
 
 instance Show Keyword where
-  show = show . symbol
+  show k = "<keyword: " ++ show (symbol k) ++ ">"
 
 instance Eq Keyword where
   a == b = symbol a == symbol b
@@ -61,7 +61,8 @@ data Program
   | BoolLiteral Bool
   | Nil
   | LocalReference Variable
-  | GlobalReference Variable
+  | -- | TODO: no need for to types of references
+    GlobalReference Variable
   | Altarnative
       { condition :: Program,
         consequent :: Program,
@@ -76,10 +77,13 @@ data Program
     Magic Keyword
   | -- | Quoting is vital for a language to support macros.
     Quote P.SExp
+  | QuasiQuote
+      { root :: P.SExp,
+        unquotes :: [(P.SExp, Program)]
+      }
   deriving (Show, Eq)
 
 evaluate :: Program -> Evaluate P.SExp
-evaluate (Quote e) = return e
 evaluate (IntLiteral i) = return $ P.Atom (P.IntLiteral i)
 evaluate (BoolLiteral b) = return $ P.Atom (P.BoolLiteral b)
 evaluate Nil = return P.Nil
@@ -93,16 +97,23 @@ evaluate (GlobalReference var) = do
   case lookup var env of
     Just e -> return e
     Nothing -> throwError "unbound global variable"
-evaluate (Altarnative ec et ef) =
-  let c = evaluate ec
-   in do
-        b <- c
-        case b of
-          (P.Atom (P.BoolLiteral True)) -> evaluate et
-          (P.Atom (P.BoolLiteral False)) -> evaluate ef
-          _ -> throwError "value not boolifyable"
+evaluate (Altarnative ec et ef) = do
+  b <- evaluate ec
+  case b of
+    (P.Atom (P.BoolLiteral True)) -> evaluate et
+    (P.Atom (P.BoolLiteral False)) -> evaluate ef
+    _ -> throwError "Value is not boolyfiable"
 evaluate (Sequence p) = foldl1 (>>) (map evaluate p)
-evaluate _ = throwError "not yet implemented"
+evaluate (Quote e) = return e
+evaluate q@(QuasiQuote {root, unquotes}) =
+  case root of
+    P.Pair (P.Atom (P.Symbol "unquote")) (P.Pair x P.Nil) ->
+      case lookup x unquotes of
+        Just p -> evaluate p
+        Nothing -> throwError $ "Could not unquote: " ++ show x
+    P.Pair car cdr -> (P.Pair <$> evaluate q {root = car}) <*> evaluate q {root = cdr}
+    _ -> pure root
+evaluate _ = throwError "Not yet implemented"
 
 objectify :: P.SExp -> Objectify Program
 objectify (P.Atom (P.IntLiteral i)) = return $ IntLiteral i
@@ -202,6 +213,20 @@ quote =
       handler = pure . Quote . P.cadr
     }
 
+-- | (quasiquote ...)
+quasiquote :: Keyword
+quasiquote =
+  Keyword
+    { symbol = "quasiquote",
+      handler = \case
+        (P.Pair _ (P.Pair root P.Nil)) -> QuasiQuote root <$> collect root
+        _ -> throwError "Invalid quasiquote syntax"
+    }
+  where
+    collect (P.Pair (P.Atom (P.Symbol "unquote")) (P.Pair x P.Nil)) = (\p -> [(x, p)]) <$> objectify x
+    collect (P.Pair car cdr) = (<>) <$> collect car <*> collect cdr
+    collect _ = pure []
+
 -- | (defmacro (name <variables>)
 --     <body>)
 defmacro :: Keyword
@@ -250,8 +275,9 @@ defaultPrepEnv =
           (\x -> (symbol x, x))
           [ if_,
             lambda,
-            quote,
             begin,
+            quote,
+            quasiquote,
             defmacro
           ]
     }

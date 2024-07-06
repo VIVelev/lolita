@@ -35,11 +35,11 @@
  - [x] Refactor
    - [x] Is there a way to combine `ReaderT` and `StateT` nicely for the objectifier?
  - [x] Pretty print `SExp`
- - [ ] Add read script from file functionality
+ - [x] Add read script from file functionality
 
 ## Jul 6, 2024
- - [ ] It's hight time I support backquotes.
- - [ ] Test defmacro
+ - [x] It's hight time I support backquotes.
+ - [x] Test defmacro
  - [ ] Add assignments
  - [ ] Handle function applications
 

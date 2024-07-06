@@ -1,4 +1,8 @@
-(defmacro (hello x)
-  (quote no-hello))
+(defmacro (unless x body)
+  (quasiquote
+    (if (unquote x)
+      (unquote body)
+      error)))
 
-(hello x)
+(unless T
+  something)
