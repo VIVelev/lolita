@@ -55,9 +55,7 @@ data LocalVariable = LocalVariable
     isMutable :: Bool,
     isDotted :: Bool
   }
-
-instance Eq LocalVariable where
-  v1 == v2 = name v1 == name v2
+  deriving (Eq)
 
 instance Show LocalVariable where
   show (LocalVariable name False False) = name

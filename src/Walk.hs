@@ -20,7 +20,7 @@ insertBox r@(LocalReference v@(LocalVariable {isMutable}))
   | isMutable = BoxRead v
   | otherwise = r
 insertBox r@(LocalAssignment v@(LocalVariable {isMutable}) f)
-  | isMutable = BoxWrite v f
+  | isMutable = BoxWrite v (insertBox f)
   | otherwise = r
 insertBox f@(Function vars body) =
   let vs = boxify vars

@@ -3,10 +3,13 @@ module Main where
 import ParseTest qualified
 import System.Exit (exitFailure, exitSuccess)
 import Test.HUnit
+import WalkTest qualified
 
 main :: IO ()
 main = do
-  counts <- ParseTest.run
-  if errors counts + failures counts == 0
+  pCounts <- ParseTest.run
+  wCounts <- WalkTest.run
+  let counts = [pCounts, wCounts]
+  if sum (map errors counts) == 0 && sum (map failures counts) == 0
     then exitSuccess
     else exitFailure

@@ -22,8 +22,8 @@ isLeft (Left _) = True
 isLeft (Right _) = False
 
 {- ORMOLU_DISABLE -}
-testCases :: Test
-testCases = TestList [
+tests :: Test
+tests = TestList [
   -- Successful cases
   testCase "Simple atom (symbol)" (Right (Atom (Symbol "abc"))) (fromString "abc"),
   testCase "Simple atom (integer)" (Right (Atom (IntLiteral 123))) (fromString "123"),
@@ -121,4 +121,4 @@ testCases = TestList [
 {- ORMOLU_ENABLE -}
 
 run :: IO Counts
-run = runTestTT testCases
+run = runTestTT tests
