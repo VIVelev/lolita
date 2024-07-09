@@ -87,7 +87,7 @@ data Program
   | Sequence [Program]
   | Function
       { vars :: [LocalVariable],
-        body :: Program
+        body :: [Program]
       }
   | Application
       { func :: Program,
@@ -102,8 +102,8 @@ data Program
         unquotes :: [(P.SExp, Program)]
       }
   | -- | The following are results of a walker.
-    BoxRead {ref :: Program}
-  | BoxWrite {ref :: Program, form :: Program}
+    BoxRead LocalVariable
+  | BoxWrite LocalVariable Program
   | BoxCreate LocalVariable
   deriving (Show, Eq)
 
@@ -193,7 +193,7 @@ objectifyWithScope varsExp bodyExp =
           body <- mapM objectify es
           locals <- map snd . pLocals <$> get
           modify (restore vars)
-          return $ Function (take (length vars) locals) (Sequence body)
+          return $ Function (take (length vars) locals) body
         Left err -> throwError $ "in body: " ++ show err
     Left err -> throwError $ "in variable list: " ++ show err
   where
@@ -256,7 +256,7 @@ set =
         _ -> throwError "Invalid set! syntax"
     }
   where
-    replace key newValue [] = []
+    replace _ _ [] = []
     replace key newValue ((k, v) : xs)
       | k == key = (k, newValue) : xs
       | otherwise = (k, v) : replace key newValue xs
@@ -310,7 +310,7 @@ invoke (Function vars body) args =
   case P.listify args of
     Right argList
       | length argList == length vars -> do
-          let action = local (extend $ zip vars argList) (evaluate body)
+          let action = local (extend $ zip vars argList) (evaluate (Sequence body))
           case runEvaluate action defaultRunTimeEnv of
             Left err -> throwError $ "Error in macro expansion: " ++ err
             Right res -> objectify res

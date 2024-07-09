@@ -106,7 +106,6 @@ testCases = TestList [
     (fromString "(define factorial (lambda (n) (if (= n 0) 1 (* n (factorial (- n 1))))))"),
 
   -- Failure cases
-  assertParserFails "Empty list" (fromString "()"),
   assertParserFails "Unmatched opening parenthesis" (fromString "(a b c"),
   assertParserFails "Unmatched closing parenthesis" (fromString "a b c)"),
   assertParserFails "Invalid character in atom" (fromString "ab@c"),

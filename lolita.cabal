@@ -25,7 +25,7 @@ test-suite main
 library
     import:           warnings
     hs-source-dirs:   src
-    exposed-modules:  Objectify, Parse, Walking
+    exposed-modules:  Objectify, Parse, Walk
     other-modules:    MonadT
     build-depends:    base,
     default-language: GHC2021
@@ -34,6 +34,6 @@ executable lolita
     import:           warnings
     hs-source-dirs:   src
     main-is:          Main.hs
-    other-modules:    Parse, Objectify, Walking, MonadT
+    other-modules:    Parse, Objectify, Walk, MonadT
     build-depends:    base,
     default-language: GHC2021
