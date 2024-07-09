@@ -1,10 +1,8 @@
 {-# LANGUAGE LambdaCase #-}
 
--- | A Tower of Evaluators LISP interpreter.
---
--- Reference:
---   - LISP in Small Pieces ...
-module Eval where
+-- | Turn S-expression into object tree (AST?)
+-- that can be walked.
+module Objectify where
 
 import MonadT
   ( ErrorT (..),
@@ -16,11 +14,13 @@ import MonadT
     StateT (..),
   )
 import Parse qualified as P
+import Text.Printf (printf)
 
 type Error = String
 
 data PrepEnv = PrepEnv
-  { variables :: [(String, Variable)],
+  { pLocals :: [(String, LocalVariable)],
+    pGlobals :: [(String, GlobalVariable)],
     keywords :: [(String, Keyword)]
   }
 
@@ -29,7 +29,10 @@ type Objectify = ErrorT String (StateT PrepEnv Identity)
 runObjectify :: Objectify a -> PrepEnv -> Either Error a
 runObjectify obj env = fst <$> runIdentity $ runStateT (runErrorT obj) env
 
-type RunTimeEnv = [(Variable, P.SExp)]
+data RunTimeEnv = RunTimeEnv
+  { rLocals :: [(LocalVariable, P.SExp)],
+    rGlobals :: [(GlobalVariable, P.SExp)]
+  }
 
 type Evaluate = ErrorT String (ReaderT RunTimeEnv Identity)
 
@@ -47,31 +50,48 @@ instance Show Keyword where
 instance Eq Keyword where
   a == b = symbol a == symbol b
 
-data Variable
-  = LocalVariable
-      { name :: String,
-        isMutable :: Bool,
-        isDotted :: Bool
-      }
-  | GlobalVariable {name :: String}
-  deriving (Show, Eq)
+data LocalVariable = LocalVariable
+  { name :: String,
+    isMutable :: Bool,
+    isDotted :: Bool
+  }
+
+instance Eq LocalVariable where
+  v1 == v2 = name v1 == name v2
+
+instance Show LocalVariable where
+  show (LocalVariable name False False) = name
+  show (LocalVariable name True False) = printf "*%s" name
+  show (LocalVariable name False True) = printf "[%s]" name
+  show (LocalVariable name True True) = printf "*[%s]" name
+
+newtype GlobalVariable = GlobalVariable String
+  deriving (Eq)
+
+instance Show GlobalVariable where
+  show (GlobalVariable name) = "g:" ++ name
 
 data Program
   = IntLiteral Integer
   | BoolLiteral Bool
   | Nil
-  | LocalReference Variable
-  | -- | TODO: no need for to types of references
-    GlobalReference Variable
-  | Altarnative
+  | LocalReference LocalVariable
+  | GlobalReference GlobalVariable
+  | LocalAssignment LocalVariable Program
+  | GlobalAssignment GlobalVariable Program
+  | Alternative
       { condition :: Program,
         consequent :: Program,
         alternate :: Program
       }
   | Sequence [Program]
   | Function
-      { vars :: [Variable],
+      { vars :: [LocalVariable],
         body :: Program
+      }
+  | Application
+      { func :: Program,
+        args :: [Program]
       }
   | -- | This is a special case, as you may guess from the name.
     Magic Keyword
@@ -81,6 +101,10 @@ data Program
       { root :: P.SExp,
         unquotes :: [(P.SExp, Program)]
       }
+  | -- | The following are results of a walker.
+    BoxRead {ref :: Program}
+  | BoxWrite {ref :: Program, form :: Program}
+  | BoxCreate LocalVariable
   deriving (Show, Eq)
 
 evaluate :: Program -> Evaluate P.SExp
@@ -89,15 +113,15 @@ evaluate (BoolLiteral b) = return $ P.Atom (P.BoolLiteral b)
 evaluate Nil = return P.Nil
 evaluate (LocalReference var) = do
   env <- ask
-  case lookup var env of
+  case lookup var (rLocals env) of
     Just e -> return e
     Nothing -> throwError "unbound local variable"
 evaluate (GlobalReference var) = do
   env <- ask
-  case lookup var env of
+  case lookup var (rGlobals env) of
     Just e -> return e
-    Nothing -> throwError "unbound global variable"
-evaluate (Altarnative ec et ef) = do
+    Nothing -> throwError "unbound local variable"
+evaluate (Alternative ec et ef) = do
   b <- evaluate ec
   case b of
     (P.Atom (P.BoolLiteral True)) -> evaluate et
@@ -120,24 +144,28 @@ objectify (P.Atom (P.IntLiteral i)) = return $ IntLiteral i
 objectify (P.Atom (P.BoolLiteral b)) = return $ BoolLiteral b
 objectify (P.Atom (P.Symbol name)) = do
   env <- get
-  case lookup name (variables env) of
+  case lookup name (pLocals env) of
     Just v@(LocalVariable {}) -> return $ LocalReference v
-    Just v@(GlobalVariable _) -> return $ GlobalReference v
-    Nothing -> case lookup name (keywords env) of
-      Just k -> return $ Magic k
-      Nothing ->
-        let var = GlobalVariable name
-            ref = GlobalReference var
-         in do
-              modify (\r@PrepEnv {variables} -> r {variables = (name, var) : variables})
-              return ref
+    Nothing -> case lookup name (pGlobals env) of
+      Just v@(GlobalVariable _) -> return $ GlobalReference v
+      Nothing -> case lookup name (keywords env) of
+        Just k -> return $ Magic k
+        Nothing ->
+          let var = GlobalVariable name
+              ref = GlobalReference var
+           in do
+                modify (\r@PrepEnv {pGlobals} -> r {pGlobals = (name, var) : pGlobals})
+                return ref
 objectify P.Nil = return Nil
-objectify e@(P.Pair car _) = do
+objectify e@(P.Pair car cdr) = do
   m <- objectify car
   case m of
     Magic k -> handler k e
-    -- otherwise, its an application
-    _ -> return Nil
+    -- otherwise it's an application
+    _ -> do
+      case P.listify cdr of
+        Right args -> Application m <$> mapM objectify args
+        Left err -> throwError $ "Invalid function application: " ++ err
 
 -- | (if <condition> <consequent> <alternate>)
 if_ :: Keyword
@@ -146,24 +174,9 @@ if_ =
     { symbol = "if",
       handler = \case
         P.Pair _ (P.Pair ce (P.Pair te (P.Pair fe P.Nil))) ->
-          Altarnative <$> objectify ce <*> objectify te <*> objectify fe
+          Alternative <$> objectify ce <*> objectify te <*> objectify fe
         _ -> throwError "Invalid if syntax"
     }
-
--- | Objectifies a sequence of expressions
--- as if they are executed sequentially.
---
--- It returns a Sequence.
-objectifySequence :: P.SExp -> Objectify Program
-objectifySequence e =
-  case P.listify e of
-    Right es ->
-      Sequence . reverse
-        <$> foldl
-          (\b a -> (:) <$> ((head <$> b) >> objectify a) <*> b)
-          ((:) <$> objectify (head es) <*> pure [])
-          (tail es)
-    Left err -> throwError err
 
 -- | Given s-expressions `(v1 v2 v3 ...)` and `(e1 e2 e3 ...)`
 -- it returns the program `(begin e1 e2 e3)`, so that the program
@@ -172,19 +185,32 @@ objectifySequence e =
 -- It returns a Function.
 objectifyWithScope :: P.SExp -> P.SExp -> Objectify Program
 objectifyWithScope varsExp bodyExp =
-  case P.listify varsExp of
-    Left err -> throwError err
-    Right list -> case toVariables list of
-      Left err -> throwError err
-      Right vars -> do
-        body <- locally (extendEnv vars) (objectifySequence bodyExp)
-        return $ Function vars body
+  case parseVars varsExp of
+    Right vars ->
+      case P.listify bodyExp of
+        Right es -> do
+          modify (extend vars)
+          body <- mapM objectify es
+          locals <- map snd . pLocals <$> get
+          modify (restore vars)
+          return $ Function (take (length vars) locals) (Sequence body)
+        Left err -> throwError $ "in body: " ++ show err
+    Left err -> throwError $ "in variable list: " ++ show err
   where
-    toVariables ((P.Atom (P.Symbol name)) : xs) =
-      (:) (LocalVariable name False False) <$> toVariables xs
-    toVariables [] = Right []
-    toVariables _ = Left "Invalid argument list, only symbols are allowed as lambda variables"
-    extendEnv vars r@PrepEnv {variables} = r {variables = map (\x -> (name x, x)) vars <> variables}
+    parseVars = \case
+      P.Nil -> Right []
+      P.Pair (P.Atom (P.Symbol name)) rest ->
+        Right (LocalVariable name False False :) <*> parseVars rest
+      _ -> Left "Invalid argument list, only symbols are allowed as lambda variables"
+    extend
+      vars
+      r@PrepEnv {pLocals} =
+        r {pLocals = zip (map name vars) vars <> pLocals}
+    restore
+      vars
+      r@PrepEnv {pLocals} =
+        let size = length vars
+         in r {pLocals = drop size pLocals}
 
 -- | (lambda (<names> ...) body)
 lambda :: Keyword
@@ -202,8 +228,39 @@ begin :: Keyword
 begin =
   Keyword
     { symbol = "begin",
-      handler = objectifySequence . P.cdr
+      handler = \case
+        P.Pair _ rest -> case P.listify rest of
+          Right es -> Sequence <$> mapM objectify es
+          Left err -> throwError $ "Invalid begin syntax: " ++ show err
+        _ -> throwError "Invalid begin syntax"
     }
+
+-- | (set! <name> form)
+set :: Keyword
+set =
+  Keyword
+    { symbol = "set!",
+      handler = \case
+        (P.Pair _ (P.Pair n (P.Pair f P.Nil))) ->
+          do
+            ref <- objectify n
+            form <- objectify f
+            case ref of
+              LocalReference var ->
+                let mutVar = var {isMutable = True}
+                 in do
+                      modify $ inLocals (replace (name var) mutVar)
+                      return $ LocalAssignment mutVar form
+              GlobalReference var -> return $ GlobalAssignment var form
+              _ -> throwError $ "Cannot set: " ++ show n
+        _ -> throwError "Invalid set! syntax"
+    }
+  where
+    replace key newValue [] = []
+    replace key newValue ((k, v) : xs)
+      | k == key = (k, newValue) : xs
+      | otherwise = (k, v) : replace key newValue xs
+    inLocals f p@PrepEnv {pLocals} = p {pLocals = f pLocals}
 
 -- | (quote ...)
 quote :: Keyword
@@ -253,8 +310,8 @@ invoke (Function vars body) args =
   case P.listify args of
     Right argList
       | length argList == length vars -> do
-          let env = zip vars argList
-          case runEvaluate (local (<> env) (evaluate body)) defaultRunTimeEnv of
+          let action = local (extend $ zip vars argList) (evaluate body)
+          case runEvaluate action defaultRunTimeEnv of
             Left err -> throwError $ "Error in macro expansion: " ++ err
             Right res -> objectify res
       | otherwise ->
@@ -264,18 +321,22 @@ invoke (Function vars body) args =
               ++ " arguments, but got "
               ++ show (length (P.listify args))
     Left e -> throwError e
+  where
+    extend locals r@RunTimeEnv {rLocals} = r {rLocals = locals <> rLocals}
 invoke _ _ = throwError "Internal error: expected a Function in macro invocation"
 
 defaultPrepEnv :: PrepEnv
 defaultPrepEnv =
   PrepEnv
-    { variables = [],
+    { pLocals = [],
+      pGlobals = [],
       keywords =
         map
           (\x -> (symbol x, x))
           [ if_,
             lambda,
             begin,
+            set,
             quote,
             quasiquote,
             defmacro
@@ -283,7 +344,11 @@ defaultPrepEnv =
     }
 
 defaultRunTimeEnv :: RunTimeEnv
-defaultRunTimeEnv = []
+defaultRunTimeEnv =
+  RunTimeEnv
+    { rLocals = [],
+      rGlobals = []
+    }
 
 eval :: P.SExp -> IO ()
 eval e = case runObjectify (objectify e) defaultPrepEnv of

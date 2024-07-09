@@ -1,0 +1,5 @@
+(lambda (x y z)
+  (lambda (x)
+    (set! x 1)
+    (set! y 2))
+  x y z)

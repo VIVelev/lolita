@@ -167,6 +167,7 @@ class (Monad m) => MonadState s m where
 
   -- | Executes a computation in a modified state. Once
   -- the computation is done, the state is restored.
+  -- TODO: maybe this is not needed after all
   locally :: (s -> s) -> m a -> m a
   locally f m = do
     original <- get

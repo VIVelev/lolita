@@ -40,8 +40,15 @@
 ## Jul 6, 2024
  - [x] It's hight time I support backquotes.
  - [x] Test defmacro
- - [ ] Add assignments
- - [ ] Handle function applications
+
+## Jul 8, 2024
+ - [x] Handle function applications
+ - [x] Add assignments
+ - [x] Code walking
+   - [x] Boxer (read, write, create)
+
+## Jul 9, 2024
+   - [ ] Lambda lifting
 
 ## Long term
 

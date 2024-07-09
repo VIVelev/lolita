@@ -100,6 +100,9 @@ try p = do
     put original
     empty
 
+zeroOrOne :: (Monoid a) => Parser a -> Parser a
+zeroOrOne p = try p <|> pure mempty
+
 char :: Char -> Parser Char
 char c = satisfy (== c) (printf "expected '%c'" c)
 
@@ -107,8 +110,8 @@ oneOf :: String -> Parser Char
 oneOf cs = satisfy (`elem` cs) (printf "expected one of \"%s\"" cs)
 
 string :: String -> Parser String
-string [] = pure []
 string (c : cs) = (:) <$> char c <*> string cs
+string [] = pure []
 
 -- | Wishful thinking: `SExp` is the output of a lisp reader :)
 data SExp
@@ -124,7 +127,7 @@ instance Show SExp where
       Atom a -> show a
       Pair car cdr -> "(" ++ show car ++ " . " ++ show cdr ++ ")"
       Nil -> ""
-    Right [] -> show Nil
+    Right [] -> "()"
 
 cddr :: SExp -> SExp
 cddr = cdr . cdr
@@ -166,7 +169,7 @@ alphabet :: String
 alphabet = "abcdefghijklmnopqrstuvwxyz"
 
 misc :: String
-misc = "-?=*+"
+misc = "-!?=*+"
 
 parens :: Parser a -> Parser a
 parens parseA = ws *> char '(' *> ws *> parseA <* ws <* char ')' <* ws
@@ -196,7 +199,7 @@ pair = parens $ Pair <$> sexp <* ws <* char '.' <* ws <*> sexp
 
 -- | Nil
 nil :: Parser SExp
-nil = Nil <$ (ws *> string "'()" <* ws)
+nil = Nil <$ (ws *> zeroOrOne (string "'") *> string "()" <* ws)
 
 -- | LISP list constructor, i.e. (x ...)
 -- Should satisfy: (a b c) is equivalent to (a . (b . (c . '())))

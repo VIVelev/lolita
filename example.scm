@@ -1,8 +1,12 @@
-(defmacro (unless x body)
-  (quasiquote
-    (if (unquote x)
-      (unquote body)
-      error)))
+(begin
 
-(unless T
-  something)
+  (defmacro (unless x body)
+    (quasiquote
+      (if (unquote x)
+        (unquote body)
+        error)))
+
+  (unless T
+    something)
+
+  )
