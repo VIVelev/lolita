@@ -189,7 +189,10 @@ instance (Show e, MonadState s m) => MonadState s (ErrorT e m) where
   get = ErrorT $ Right <$> get
   put s = ErrorT $ Right <$> put s
 
+instance (MonadReader r m) => MonadReader r (StateT s m) where
+  ask = StateT $ \s -> (,s) <$> ask
+  local f m = StateT $ \s -> local f (runStateT m s)
+
 -- TODO: Instances
 --  - [ ] ReaderT of MonadState
---  - [ ] StateT of MonadReader
 --  - [ ] StateT of MonadError

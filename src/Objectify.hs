@@ -75,8 +75,9 @@ data Program
   | Nil
   | LocalReference LocalVariable
   | GlobalReference GlobalVariable
-  | LocalAssignment LocalVariable Program
-  | GlobalAssignment GlobalVariable Program
+  | LocalAssignment Program Program
+  | --                ^ LocalReference
+    GlobalAssignment GlobalVariable Program
   | Alternative
       { condition :: Program,
         consequent :: Program,
@@ -99,10 +100,18 @@ data Program
       { root :: P.SExp,
         unquotes :: [(P.SExp, Program)]
       }
-  | -- | The following are results of a walker.
-    BoxRead LocalVariable
-  | BoxWrite LocalVariable Program
-  | BoxCreate LocalVariable
+  | -- The following are results of walkers:
+    BoxRead Program
+  | --      ^ LocalReference
+    BoxWrite Program Program
+  | --       ^ LocalReference
+    BoxCreate LocalVariable
+  | FlatFunction
+      { vars :: [LocalVariable],
+        body :: [Program],
+        free :: [LocalVariable]
+      }
+  | FreeReference LocalVariable
   deriving (Show, Eq)
 
 evaluate :: Program -> Evaluate P.SExp
@@ -248,7 +257,7 @@ set =
                 let mutVar = var {isMutable = True}
                  in do
                       modify $ inLocals (replace (name var) mutVar)
-                      return $ LocalAssignment mutVar form
+                      return $ LocalAssignment (LocalReference mutVar) form
               GlobalReference var -> return $ GlobalAssignment var form
               _ -> throwError $ "Cannot set: " ++ show n
         _ -> throwError "Invalid set! syntax"

@@ -26,20 +26,20 @@ testImmutableLocalReference = TestCase $ assertEqual
 testMutableLocalReference :: Test
 testMutableLocalReference = TestCase $ assertEqual
   "Mutable local reference should be boxed"
-  (BoxRead (LocalVariable "x" True False))
+  (BoxRead (LocalReference (LocalVariable "x" True False)))
   (insertBox (LocalReference (LocalVariable "x" True False)))
 
 testImmutableLocalAssignment :: Test
 testImmutableLocalAssignment = TestCase $ assertEqual
   "Immutable local assignment should not be boxed"
-  (LocalAssignment (LocalVariable "x" False False) (IntLiteral 5))
-  (insertBox (LocalAssignment (LocalVariable "x" False False) (IntLiteral 5)))
+  (LocalAssignment (LocalReference (LocalVariable "x" False False)) (IntLiteral 5))
+  (insertBox (LocalAssignment (LocalReference (LocalVariable "x" False False)) (IntLiteral 5)))
 
 testMutableLocalAssignment :: Test
 testMutableLocalAssignment = TestCase $ assertEqual
   "Mutable local assignment should be boxed"
-  (BoxWrite (LocalVariable "x" True False) (IntLiteral 5))
-  (insertBox (LocalAssignment (LocalVariable "x" True False) (IntLiteral 5)))
+  (BoxWrite (LocalReference (LocalVariable "x" True False)) (IntLiteral 5))
+  (insertBox (LocalAssignment (LocalReference (LocalVariable "x" True False)) (IntLiteral 5)))
 
 testFunctionWithMutableVars :: Test
 testFunctionWithMutableVars = TestCase $ assertEqual
@@ -47,12 +47,12 @@ testFunctionWithMutableVars = TestCase $ assertEqual
   (Function
     [LocalVariable "x" True False, LocalVariable "y" False False]
     [ BoxCreate (LocalVariable "x" True False)
-    , BoxWrite (LocalVariable "x" True False) (IntLiteral 5)
-    , BoxRead (LocalVariable "x" True False)
+    , BoxWrite (LocalReference (LocalVariable "x" True False)) (IntLiteral 5)
+    , BoxRead (LocalReference (LocalVariable "x" True False))
     ])
   (insertBox (Function
     [LocalVariable "x" True False, LocalVariable "y" False False]
-    [ LocalAssignment (LocalVariable "x" True False) (IntLiteral 5)
+    [ LocalAssignment (LocalReference (LocalVariable "x" True False)) (IntLiteral 5)
     , LocalReference (LocalVariable "x" True False)
     ]))
 
@@ -65,14 +65,14 @@ testNestedFunction = TestCase $ assertEqual
     , Function
         [LocalVariable "y" True False]
         [ BoxCreate (LocalVariable "y" True False)
-        , BoxWrite (LocalVariable "y" True False) (BoxRead (LocalVariable "x" True False))
+        , BoxWrite (LocalReference (LocalVariable "y" True False)) (BoxRead (LocalReference (LocalVariable "x" True False)))
         ]
     ])
   (insertBox (Function
     [LocalVariable "x" True False]
     [ Function
         [LocalVariable "y" True False]
-        [ LocalAssignment (LocalVariable "y" True False) (LocalReference (LocalVariable "x" True False))
+        [ LocalAssignment (LocalReference (LocalVariable "y" True False)) (LocalReference (LocalVariable "x" True False))
         ]
     ]))
 {- ORMOLU_ENABLE -}

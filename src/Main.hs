@@ -4,7 +4,7 @@ import Data.String (IsString (fromString))
 import Objectify qualified as O (defaultPrepEnv, objectify, runObjectify)
 import Parse qualified as P (runParser, sexp)
 import System.Environment
-import Walk qualified as W (insertBox)
+import Walk qualified as W (box, lift)
 
 main :: IO ()
 main = do
@@ -14,7 +14,7 @@ main = do
       contents <- readFile filename
       case P.runParser P.sexp $ fromString contents of
         Right expr -> case O.runObjectify (O.objectify expr) O.defaultPrepEnv of
-          Right obj -> print (W.insertBox obj)
+          Right obj -> print . W.lift . W.box $ obj
           Left e -> print e
         Left e -> print e
     _ -> putStrLn "Usage: program <filename>"

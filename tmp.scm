@@ -1,5 +1,6 @@
 (lambda (x y z)
   (lambda (x)
     (set! x 1)
+    (lambda () z)
     (set! y 2))
   x y z)
