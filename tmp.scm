@@ -1,4 +1,4 @@
 (lambda (x)
+  x
   (lambda ()
-    x
     (set! x 1)))

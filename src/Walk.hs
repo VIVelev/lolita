@@ -1,118 +1,74 @@
-{-# LANGUAGE LambdaCase #-}
-
 module Walk where
 
 import Data.Foldable (find)
-import Data.List (partition)
 import MonadT
   ( Identity (..),
+    MonadReader (..),
     MonadState (..),
+    ReaderT (..),
     StateT (..),
   )
-import Objectify (ParsedProgram, Program (..), Variable (..))
+import Objectify (Program (..), Variable (..))
 
-walk :: (Monad m) => ParsedProgram -> (ParsedProgram -> m (Program v f)) -> v -> f -> m (Program v f)
-walk (Reference v) _ dv _ = pure $ Reference (v {vInfo = dv})
-walk (Assignment v p) f dv _ = Assignment v {vInfo = dv} <$> f p
-walk (Alternative pc pt pf) f _ _ = Alternative <$> f pc <*> f pt <*> f pf
-walk (Sequence ps) f _ _ = Sequence <$> mapM f ps
-walk p@(Function {vars, body}) f dv df =
-  ( \x ->
-      p
-        { vars = map (\v -> v {vInfo = dv}) vars,
-          body = x,
-          fInfo = df
-        }
-  )
-    <$> mapM f body
-walk (Application func args) f _ _ = Application <$> f func <*> mapM f args
-walk (IntLiteral i) _ _ _ = pure $ IntLiteral i
-walk (BoolLiteral b) _ _ _ = pure $ BoolLiteral b
-walk Nil _ _ _ = pure Nil
-walk (Magic k) _ _ _ = pure $ Magic k
-walk (Quote e) _ _ _ = pure $ Quote e
-walk (QuasiQuote {}) _ _ _ = error "TODO"
+walk :: (Monad m) => Program () () -> (Program () () -> m (Program v f)) -> m (Program v f)
+walk (IntLiteral i) _ = pure $ IntLiteral i
+walk (BoolLiteral b) _ = pure $ BoolLiteral b
+walk Nil _ = pure Nil
+walk (Reference _) _ = error "this should be implemented by the code walker"
+walk (Assignment _ _) _ = error "this should be implemented by the code walker"
+walk (Alternative pc pt pf) f = Alternative <$> f pc <*> f pt <*> f pf
+walk (Sequence ps) f = Sequence <$> mapM f ps
+walk (Function {}) _ = error "this should be implemented by the code walker"
+walk (Application func args) f = Application <$> f func <*> mapM f args
+walk (Magic k) _ = pure $ Magic k
+walk (Quote e) _ = pure $ Quote e
+walk (QuasiQuote {}) _ = error "TODO: what to do here?"
 
-newtype BoxVInfo = BoxVInfo {isMutable :: Bool}
+data MarkFInfo = MarkFInfo
+  { -- | mutable variables in the body of the function
+    mutable :: [Variable ()],
+    -- | free variables in the body of the function
+    free :: [Variable ()]
+  }
   deriving (Show)
 
-instance Show (Variable BoxVInfo) where
-  show (Variable name False BoxVInfo {isMutable = False}) = name
-  show (Variable name False BoxVInfo {isMutable = True}) = "*" ++ name
-  show (Variable name True BoxVInfo {isMutable = False}) = "g:" ++ name
-  show (Variable name True BoxVInfo {isMutable = True}) = "*g:" ++ name
+deriving instance Show (Program () MarkFInfo)
 
-newtype BoxFInfo = BoxFInfo {mutables :: [Variable BoxVInfo]}
-  deriving (Show)
+type MarkFM = StateT MarkFInfo (ReaderT [Variable ()] Identity)
+-- ^                                    ^ Variables in the current local scope
 
-deriving instance Show (Program BoxVInfo BoxFInfo)
+-- | Mark mutable variables and free references in function definition
+markf :: Program () () -> Program () MarkFInfo
+markf p =
+  fst . runIdentity $
+    runReaderT
+      (runStateT (_markf p) (MarkFInfo [] []))
+      []
 
-type BoxM = StateT [Variable BoxVInfo] Identity
--- ^               ^ variables of the current function
+_markf :: Program () () -> MarkFM (Program () MarkFInfo)
+_markf (Reference v) = do
+  locals :: [Variable ()] <- ask
+  case find ((== name v) . name) locals of
+    Just _ -> pure ()
+    Nothing -> modify (\i@MarkFInfo {free} -> i {free = v : free})
+  return $ Reference v
+_markf (Assignment v f) = do
+  locals :: [Variable ()] <- ask
+  case find ((== name v) . name) locals of
+    Just _ -> pure ()
+    Nothing -> modify (\i@MarkFInfo {mutable} -> i {mutable = v : mutable})
+  Assignment v <$> _markf f
+_markf (Function {vars, body}) = do
+  body_ <- local (const vars) (mapM _markf body)
+  Function vars body_ <$> get
+_markf p = walk p _markf
 
--- | Make read/write of local variables read/write in boxes.
-box :: ParsedProgram -> Program BoxVInfo BoxFInfo
-box p = fst . runIdentity $ runStateT (_box p) []
-
-_box :: ParsedProgram -> BoxM (Program BoxVInfo BoxFInfo)
-_box (Reference v) = do
-  vars :: [Variable BoxVInfo] <- get
-  case find ((== name v) . name) vars of
-    Just modifiedVar -> return $ Reference modifiedVar
-    Nothing -> error "unreachable"
-_box (Assignment v f) =
-  let mut = v {vInfo = BoxVInfo True}
-   in modify (add mut) >> Assignment (v {vInfo = BoxVInfo True}) <$> _box f
-  where
-    add mut (x : xs)
-      | name mut == name x = mut : xs
-      | otherwise = x : add mut xs
-    add _ [] = []
-_box (Function {vars, body}) = do
-  modify (map (\v -> v {vInfo = BoxVInfo False}) vars <>)
-  let (assigns, pures) = partition (\case (_, Assignment _ _) -> True; (_, _) -> False) (zip [0 .. length body - 1] body)
-  let (order, total) = unzip (assigns <> pures)
-  bbody <- mapM _box total
-  -- TODO: refactor
-  let (assignsM, puresM) = splitAt (length assigns) (zip order bbody)
-  let ordered = reorder assignsM puresM
-  newVars <- take (length vars) <$> get
-  modify (drop (length vars) :: [Variable BoxVInfo] -> [Variable BoxVInfo])
-  return $ Function newVars ordered (BoxFInfo $ filter (isMutable . vInfo) newVars)
-  where
-    reorder xx@((i1, x) : xs) yy@((i2, y) : ys) =
-      if i1 < i2
-        then x : reorder xs yy
-        else y : reorder xx ys
-    reorder xx@(_ : _) [] = map snd xx
-    reorder [] yy@(_ : _) = map snd yy
-    reorder [] [] = []
-_box p = walk p _box (BoxVInfo False) (BoxFInfo [])
-
--- type LiftM = StateT [LocalVariable] (ReaderT [LocalVariable] Identity)
--- -- ^                ^ Free variables         ^ Currently bounded variables
---
--- -- | Record free variables for lambda lifting
--- lift :: Program -> Program
--- lift p = fst . runIdentity $ runReaderT (runStateT (_lift p) []) []
---
--- _lift :: Program -> LiftM Program
--- _lift r@(LocalReference v@(LocalVariable {})) = do
---   bounded :: [LocalVariable] <- ask
---   if v `elem` bounded
---     then return r
---     else do
---       modify $ add v
---       return $ FreeReference v
---   where
---     add var free =
---       if var `notElem` free
---         then var : free
---         else free
--- _lift (Function vars body) = do
---   orig :: [LocalVariable] <- get
---   bbody <- local (const vars) (mapM _lift body)
---   free <- get
---   put orig
---   return $ FlatFunction vars bbody free
--- _lift p = walk p _lift
+-- instance Show (Variable MarkVInfo) where
+--   show (Variable name False (MarkVInfo False False)) = name
+--   show (Variable name False (MarkVInfo True False)) = "*" ++ name
+--   show (Variable name False (MarkVInfo False True)) = "~" ++ name
+--   show (Variable name False (MarkVInfo True True)) = "~*" ++ name
+--   show (Variable name True (MarkVInfo False False)) = "g:" ++ name
+--   show (Variable name True (MarkVInfo True False)) = "*g:" ++ name
+--   show (Variable name True (MarkVInfo False True)) = "~g:" ++ name
+--   show (Variable name True (MarkVInfo True True)) = "~*g:" ++ name

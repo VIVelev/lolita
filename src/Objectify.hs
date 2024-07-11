@@ -1,7 +1,6 @@
 {-# LANGUAGE LambdaCase #-}
 
--- | Turn S-expression into object tree (AST?)
--- that can be walked.
+-- | Turn S-expression into object tree that can be walked.
 module Objectify where
 
 import MonadT
@@ -17,11 +16,11 @@ import Parse qualified as P
 
 type Error = String
 
-newtype LocalPrepEnv = LocalPrepEnv [(String, ParsedVariable)]
+newtype LocalPrepEnv = LocalPrepEnv [(String, Variable ())]
   deriving (Semigroup, Monoid)
 
 data GlobalPrepEnv = GlobalPrepEnv
-  { variables :: [(String, ParsedVariable)],
+  { variables :: [(String, Variable ())],
     keywords :: [(String, Keyword)]
   }
 
@@ -31,8 +30,8 @@ runObjectify :: ObjectifyM a -> (LocalPrepEnv, GlobalPrepEnv) -> Either Error a
 runObjectify obj (l, g) = fst <$> runIdentity $ runStateT (runReaderT (runErrorT obj) l) g
 
 data RunTimeEnv = RunTimeEnv
-  { rLocals :: [(ParsedVariable, P.SExp)],
-    rGlobals :: [(ParsedVariable, P.SExp)]
+  { rLocals :: [(Variable (), P.SExp)],
+    rGlobals :: [(Variable (), P.SExp)]
   }
 
 type Evaluate = ErrorT String (ReaderT RunTimeEnv Identity)
@@ -42,7 +41,7 @@ runEvaluate evl env = runIdentity $ runReaderT (runErrorT evl) env
 
 data Keyword = Keyword
   { symbol :: String,
-    handler :: P.SExp -> ObjectifyM ParsedProgram
+    handler :: P.SExp -> ObjectifyM (Program () ())
   }
 
 instance Show Keyword where
@@ -59,9 +58,7 @@ data Variable v = Variable
   }
   deriving (Eq)
 
-type ParsedVariable = Variable ()
-
-instance Show ParsedVariable where
+instance Show (Variable ()) where
   show (Variable name False _) = name
   show (Variable name True _) = "g:" ++ name
 
@@ -95,27 +92,11 @@ data Program v f
       { root :: P.SExp,
         unquotes :: [(P.SExp, Program v f)]
       }
-  deriving
-    ( -- | -- The following are results of walkers:
-      --   BoxRead Program
-      -- | --      ^ LocalReference
-      --   BoxWrite Program Program
-      -- | --       ^ LocalReference
-      --   BoxCreate LocalVariable
-      -- | FlatFunction
-      --     { vars :: [LocalVariable],
-      --       body :: [Program],
-      --       free :: [LocalVariable]
-      --     }
-      -- | FreeReference LocalVariable
-      Eq
-    )
+  deriving (Eq)
 
-type ParsedProgram = Program () ()
+deriving instance Show (Program () ())
 
-deriving instance Show ParsedProgram
-
-evaluate :: ParsedProgram -> Evaluate P.SExp
+evaluate :: Program () () -> Evaluate P.SExp
 evaluate (IntLiteral i) = return $ P.Atom (P.IntLiteral i)
 evaluate (BoolLiteral b) = return $ P.Atom (P.BoolLiteral b)
 evaluate Nil = return P.Nil
@@ -144,7 +125,7 @@ evaluate q@(QuasiQuote {root, unquotes}) =
     _ -> pure root
 evaluate _ = throwError "Not yet implemented"
 
-objectify :: P.SExp -> ObjectifyM ParsedProgram
+objectify :: P.SExp -> ObjectifyM (Program () ())
 objectify (P.Atom (P.IntLiteral i)) = return $ IntLiteral i
 objectify (P.Atom (P.BoolLiteral b)) = return $ BoolLiteral b
 objectify (P.Atom (P.Symbol name)) = do
@@ -190,7 +171,7 @@ if_ =
 -- referes to the variables v1, v2, etc.
 --
 -- It returns a Function.
-objectifyWithScope :: P.SExp -> P.SExp -> ObjectifyM ParsedProgram
+objectifyWithScope :: P.SExp -> P.SExp -> ObjectifyM (Program () ())
 objectifyWithScope varsExp bodyExp =
   case parseVars varsExp of
     Right vars ->
@@ -290,7 +271,7 @@ defmacro =
         _ -> throwError "Invalid defmacro syntax: expected (defmacro (name <variables>) <body>)"
     }
 
-invoke :: ParsedProgram -> P.SExp -> ObjectifyM ParsedProgram
+invoke :: Program () () -> P.SExp -> ObjectifyM (Program () ())
 invoke (Function vars body _) args =
   case P.listify args of
     Right argList
