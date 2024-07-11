@@ -1,12 +1,12 @@
 (begin
 
-  (defmacro (unless x body)
-    (quasiquote
-      (if (unquote x)
-        (unquote body)
-        error)))
+  (defmacro (aif test-form then-form else-form)
+    `((lambda (it)
+        (if it ,then-form ,else-form))
+      ,test-form))
 
-  (unless T
-    something)
+  (aif some-variable
+    it
+    other-thing)
 
   )

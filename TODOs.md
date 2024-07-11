@@ -45,14 +45,26 @@
  - [x] Handle function applications
  - [x] Add assignments
  - [x] Code walking
-   - [x] Boxer (read, write, create)
+ - [x] Boxer (read, write, create)
 
 ## Jul 9, 2024
-   - [ ] Lambda lifting
+   - [x] Lambda lifting (extracting free variables)
+
+## Jul 10, 2024
+   - [ ] Refactor code walking stages via type parameters
+     - [x] Refactor mutable marking and boxing
+   - [x] Add reader macros
+     - [x] quote
+     - [x] quasiquote
+     - [x] unquote
+
+## Jul 11, 2024
+   - [ ] Refactor code walking stages via type parameters
 
 ## Long term
 
- - [ ] Should I add `MonadTrans` style `lift`s?
+ - [ ] Implement assignment, application, and function for macro evaluation
+ - [ ] Should I add `MonadTrans` style `lift`'s?
  - [ ] How to implement exception handling in the language itself?
    Something like the handler demonstrated in LiSP (via stack) won't
    do it, or will it?

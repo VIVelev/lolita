@@ -14,24 +14,25 @@ import MonadT
     StateT (..),
   )
 import Parse qualified as P
-import Text.Printf (printf)
 
 type Error = String
 
-data PrepEnv = PrepEnv
-  { pLocals :: [(String, LocalVariable)],
-    pGlobals :: [(String, GlobalVariable)],
+newtype LocalPrepEnv = LocalPrepEnv [(String, ParsedVariable)]
+  deriving (Semigroup, Monoid)
+
+data GlobalPrepEnv = GlobalPrepEnv
+  { variables :: [(String, ParsedVariable)],
     keywords :: [(String, Keyword)]
   }
 
-type Objectify = ErrorT String (StateT PrepEnv Identity)
+type ObjectifyM = ErrorT String (ReaderT LocalPrepEnv (StateT GlobalPrepEnv Identity))
 
-runObjectify :: Objectify a -> PrepEnv -> Either Error a
-runObjectify obj env = fst <$> runIdentity $ runStateT (runErrorT obj) env
+runObjectify :: ObjectifyM a -> (LocalPrepEnv, GlobalPrepEnv) -> Either Error a
+runObjectify obj (l, g) = fst <$> runIdentity $ runStateT (runReaderT (runErrorT obj) l) g
 
 data RunTimeEnv = RunTimeEnv
-  { rLocals :: [(LocalVariable, P.SExp)],
-    rGlobals :: [(GlobalVariable, P.SExp)]
+  { rLocals :: [(ParsedVariable, P.SExp)],
+    rGlobals :: [(ParsedVariable, P.SExp)]
   }
 
 type Evaluate = ErrorT String (ReaderT RunTimeEnv Identity)
@@ -41,7 +42,7 @@ runEvaluate evl env = runIdentity $ runReaderT (runErrorT evl) env
 
 data Keyword = Keyword
   { symbol :: String,
-    handler :: P.SExp -> Objectify Program
+    handler :: P.SExp -> ObjectifyM ParsedProgram
   }
 
 instance Show Keyword where
@@ -50,47 +51,41 @@ instance Show Keyword where
 instance Eq Keyword where
   a == b = symbol a == symbol b
 
-data LocalVariable = LocalVariable
+data Variable v = Variable
   { name :: String,
-    isMutable :: Bool,
-    isDotted :: Bool
+    isGlobal :: Bool,
+    -- to be filled by code walkers
+    vInfo :: v
   }
   deriving (Eq)
 
-instance Show LocalVariable where
-  show (LocalVariable name False False) = name
-  show (LocalVariable name True False) = printf "*%s" name
-  show (LocalVariable name False True) = printf "[%s]" name
-  show (LocalVariable name True True) = printf "*[%s]" name
+type ParsedVariable = Variable ()
 
-newtype GlobalVariable = GlobalVariable String
-  deriving (Eq)
+instance Show ParsedVariable where
+  show (Variable name False _) = name
+  show (Variable name True _) = "g:" ++ name
 
-instance Show GlobalVariable where
-  show (GlobalVariable name) = "g:" ++ name
-
-data Program
+data Program v f
   = IntLiteral Integer
   | BoolLiteral Bool
   | Nil
-  | LocalReference LocalVariable
-  | GlobalReference GlobalVariable
-  | LocalAssignment Program Program
-  | --                ^ LocalReference
-    GlobalAssignment GlobalVariable Program
+  | Reference (Variable v)
+  | Assignment (Variable v) (Program v f)
   | Alternative
-      { condition :: Program,
-        consequent :: Program,
-        alternate :: Program
+      { condition :: Program v f,
+        consequent :: Program v f,
+        alternate :: Program v f
       }
-  | Sequence [Program]
+  | Sequence [Program v f]
   | Function
-      { vars :: [LocalVariable],
-        body :: [Program]
+      { vars :: [Variable v],
+        body :: [Program v f],
+        -- | to be filled by code walkers
+        fInfo :: f
       }
   | Application
-      { func :: Program,
-        args :: [Program]
+      { func :: Program v f,
+        args :: [Program v f]
       }
   | -- | This is a special case, as you may guess from the name.
     Magic Keyword
@@ -98,36 +93,39 @@ data Program
     Quote P.SExp
   | QuasiQuote
       { root :: P.SExp,
-        unquotes :: [(P.SExp, Program)]
+        unquotes :: [(P.SExp, Program v f)]
       }
-  | -- The following are results of walkers:
-    BoxRead Program
-  | --      ^ LocalReference
-    BoxWrite Program Program
-  | --       ^ LocalReference
-    BoxCreate LocalVariable
-  | FlatFunction
-      { vars :: [LocalVariable],
-        body :: [Program],
-        free :: [LocalVariable]
-      }
-  | FreeReference LocalVariable
-  deriving (Show, Eq)
+  deriving
+    ( -- | -- The following are results of walkers:
+      --   BoxRead Program
+      -- | --      ^ LocalReference
+      --   BoxWrite Program Program
+      -- | --       ^ LocalReference
+      --   BoxCreate LocalVariable
+      -- | FlatFunction
+      --     { vars :: [LocalVariable],
+      --       body :: [Program],
+      --       free :: [LocalVariable]
+      --     }
+      -- | FreeReference LocalVariable
+      Eq
+    )
 
-evaluate :: Program -> Evaluate P.SExp
+type ParsedProgram = Program () ()
+
+deriving instance Show ParsedProgram
+
+evaluate :: ParsedProgram -> Evaluate P.SExp
 evaluate (IntLiteral i) = return $ P.Atom (P.IntLiteral i)
 evaluate (BoolLiteral b) = return $ P.Atom (P.BoolLiteral b)
 evaluate Nil = return P.Nil
-evaluate (LocalReference var) = do
+evaluate (Reference var) = do
   env <- ask
   case lookup var (rLocals env) of
     Just e -> return e
-    Nothing -> throwError "unbound local variable"
-evaluate (GlobalReference var) = do
-  env <- ask
-  case lookup var (rGlobals env) of
-    Just e -> return e
-    Nothing -> throwError "unbound local variable"
+    Nothing -> case lookup var (rGlobals env) of
+      Just e -> return e
+      Nothing -> throwError "unbound local variable"
 evaluate (Alternative ec et ef) = do
   b <- evaluate ec
   case b of
@@ -146,23 +144,25 @@ evaluate q@(QuasiQuote {root, unquotes}) =
     _ -> pure root
 evaluate _ = throwError "Not yet implemented"
 
-objectify :: P.SExp -> Objectify Program
+objectify :: P.SExp -> ObjectifyM ParsedProgram
 objectify (P.Atom (P.IntLiteral i)) = return $ IntLiteral i
 objectify (P.Atom (P.BoolLiteral b)) = return $ BoolLiteral b
 objectify (P.Atom (P.Symbol name)) = do
-  env <- get
-  case lookup name (pLocals env) of
-    Just v@(LocalVariable {}) -> return $ LocalReference v
-    Nothing -> case lookup name (pGlobals env) of
-      Just v@(GlobalVariable _) -> return $ GlobalReference v
-      Nothing -> case lookup name (keywords env) of
-        Just k -> return $ Magic k
-        Nothing ->
-          let var = GlobalVariable name
-              ref = GlobalReference var
-           in do
-                modify (\r@PrepEnv {pGlobals} -> r {pGlobals = (name, var) : pGlobals})
-                return ref
+  LocalPrepEnv locals <- ask
+  case lookup name locals of
+    Just v@(Variable {}) -> return $ Reference v
+    Nothing -> do
+      GlobalPrepEnv {variables, keywords} <- get
+      case lookup name variables of
+        Just v@(Variable {}) -> return $ Reference v
+        Nothing -> case lookup name keywords of
+          Just k -> return $ Magic k
+          Nothing ->
+            let var = Variable name True ()
+                ref = Reference var
+             in do
+                  modify (\r@GlobalPrepEnv {variables = vs} -> r {variables = (name, var) : vs})
+                  return ref
 objectify P.Nil = return Nil
 objectify e@(P.Pair car cdr) = do
   m <- objectify car
@@ -190,34 +190,22 @@ if_ =
 -- referes to the variables v1, v2, etc.
 --
 -- It returns a Function.
-objectifyWithScope :: P.SExp -> P.SExp -> Objectify Program
+objectifyWithScope :: P.SExp -> P.SExp -> ObjectifyM ParsedProgram
 objectifyWithScope varsExp bodyExp =
   case parseVars varsExp of
     Right vars ->
       case P.listify bodyExp of
         Right es -> do
-          modify (extend vars)
-          body <- mapM objectify es
-          locals <- map snd . pLocals <$> get
-          modify (restore vars)
-          return $ Function (take (length vars) locals) body
+          body <- local (LocalPrepEnv (zip (map name vars) vars) <>) (mapM objectify es)
+          return $ Function vars body ()
         Left err -> throwError $ "in body: " ++ show err
     Left err -> throwError $ "in variable list: " ++ show err
   where
     parseVars = \case
       P.Nil -> Right []
       P.Pair (P.Atom (P.Symbol name)) rest ->
-        Right (LocalVariable name False False :) <*> parseVars rest
+        Right (Variable name False () :) <*> parseVars rest
       _ -> Left "Invalid argument list, only symbols are allowed as lambda variables"
-    extend
-      vars
-      r@PrepEnv {pLocals} =
-        r {pLocals = zip (map name vars) vars <> pLocals}
-    restore
-      vars
-      r@PrepEnv {pLocals} =
-        let size = length vars
-         in r {pLocals = drop size pLocals}
 
 -- | (lambda (<names> ...) body)
 lambda :: Keyword
@@ -253,21 +241,10 @@ set =
             ref <- objectify n
             form <- objectify f
             case ref of
-              LocalReference var ->
-                let mutVar = var {isMutable = True}
-                 in do
-                      modify $ inLocals (replace (name var) mutVar)
-                      return $ LocalAssignment (LocalReference mutVar) form
-              GlobalReference var -> return $ GlobalAssignment var form
+              Reference var -> return $ Assignment var form
               _ -> throwError $ "Cannot set: " ++ show n
         _ -> throwError "Invalid set! syntax"
     }
-  where
-    replace _ _ [] = []
-    replace key newValue ((k, v) : xs)
-      | k == key = (k, newValue) : xs
-      | otherwise = (k, v) : replace key newValue xs
-    inLocals f p@PrepEnv {pLocals} = p {pLocals = f pLocals}
 
 -- | (quote ...)
 quote :: Keyword
@@ -287,7 +264,8 @@ quasiquote =
         _ -> throwError "Invalid quasiquote syntax"
     }
   where
-    collect (P.Pair (P.Atom (P.Symbol "unquote")) (P.Pair x P.Nil)) = (\p -> [(x, p)]) <$> objectify x
+    collect (P.Pair (P.Atom (P.Symbol "unquote")) (P.Pair x P.Nil)) =
+      (\p -> [(x, p)]) <$> objectify x
     collect (P.Pair car cdr) = (<>) <$> collect car <*> collect cdr
     collect _ = pure []
 
@@ -305,15 +283,15 @@ defmacro =
                 Left err -> throwError $ "Error in macro definition: " ++ err
                 Right expanderProgram ->
                   let newKeyword = Keyword {symbol = name, handler = invoke expanderProgram . P.cdr}
-                   in withState
-                        (\r@PrepEnv {keywords} -> r {keywords = (name, newKeyword) : keywords})
-                        (pure $ BoolLiteral True)
+                   in do
+                        modify (\r@GlobalPrepEnv {keywords = kw} -> r {keywords = (name, newKeyword) : kw})
+                        return $ BoolLiteral True
             _ -> throwError "Invalid macro name: expected a symbol"
         _ -> throwError "Invalid defmacro syntax: expected (defmacro (name <variables>) <body>)"
     }
 
-invoke :: Program -> P.SExp -> Objectify Program
-invoke (Function vars body) args =
+invoke :: ParsedProgram -> P.SExp -> ObjectifyM ParsedProgram
+invoke (Function vars body _) args =
   case P.listify args of
     Right argList
       | length argList == length vars -> do
@@ -332,23 +310,24 @@ invoke (Function vars body) args =
     extend locals r@RunTimeEnv {rLocals} = r {rLocals = locals <> rLocals}
 invoke _ _ = throwError "Internal error: expected a Function in macro invocation"
 
-defaultPrepEnv :: PrepEnv
+defaultPrepEnv :: (LocalPrepEnv, GlobalPrepEnv)
 defaultPrepEnv =
-  PrepEnv
-    { pLocals = [],
-      pGlobals = [],
-      keywords =
-        map
-          (\x -> (symbol x, x))
-          [ if_,
-            lambda,
-            begin,
-            set,
-            quote,
-            quasiquote,
-            defmacro
-          ]
-    }
+  ( LocalPrepEnv [],
+    GlobalPrepEnv
+      { variables = [],
+        keywords =
+          map
+            (\x -> (symbol x, x))
+            [ if_,
+              lambda,
+              begin,
+              set,
+              quote,
+              quasiquote,
+              defmacro
+            ]
+      }
+  )
 
 defaultRunTimeEnv :: RunTimeEnv
 defaultRunTimeEnv =

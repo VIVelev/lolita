@@ -182,9 +182,9 @@ integer = toInt <$> (ws *> try negative <|> try positive <* ws)
     toInt = IntLiteral . read
 
 boolean :: Parser AKind
-boolean = toBool <$> (ws *> try (char 'T') <|> try (char 'F') <* ws)
+boolean = toBool <$> (ws *> try (string "#t") <|> try (string "#f") <* ws)
   where
-    toBool = BoolLiteral . (== 'T')
+    toBool = BoolLiteral . (== "#t")
 
 symbol :: Parser AKind
 symbol = Symbol <$> (ws *> some (oneOf $ alphabet ++ digits ++ misc) <* ws)
@@ -208,10 +208,35 @@ list = parens $ do
   elements <- some (ws *> sexp <* ws)
   return $ foldr Pair Nil elements
 
+-- | Reader quote
+quote :: Parser SExp
+quote = inject <$> (ws *> char '\'' *> sexp <* ws)
+  where
+    inject x = Pair (Atom (Symbol "quote")) (Pair x Nil)
+
+-- | Reader quasiquote
+quasiquote :: Parser SExp
+quasiquote = inject <$> (ws *> char '`' *> sexp <* ws)
+  where
+    inject x = Pair (Atom (Symbol "quasiquote")) (Pair x Nil)
+
+-- | Reader unquote
+unquote :: Parser SExp
+unquote = inject <$> (ws*> char ',' *> sexp <* ws)
+  where
+    inject x = Pair (Atom (Symbol "unquote")) (Pair x Nil)
+
+-- | All the reader macros
+readerMacros :: Parser SExp
+readerMacros = try quote <|> try quasiquote <|> try unquote
+
 sexp :: Parser SExp
-sexp = try atom <|> try nil <|> try pair <|> list
+sexp =
+  try readerMacros
+    <|> try atom
+    <|> try nil
+    <|> try pair
+    <|> list
 
 -- Otherthings to support:
---   - [ ] `'x` should be read as `(quote x)`
---   - [ ] If I feel fancy, should support splatting `,@`
---   - [ ] Well, if we support splatting, why not backquotes too!
+--   - [ ] Support splatting `,@`
