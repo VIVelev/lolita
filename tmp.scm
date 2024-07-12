@@ -1,4 +1,4 @@
 (lambda (x)
-  x
-  (lambda ()
-    (set! x 1)))
+  y
+  (lambda (y) (set! x 1) z)
+  x)
