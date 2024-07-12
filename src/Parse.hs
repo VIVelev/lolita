@@ -222,7 +222,7 @@ quasiquote = inject <$> (ws *> char '`' *> sexp <* ws)
 
 -- | Reader unquote
 unquote :: Parser SExp
-unquote = inject <$> (ws*> char ',' *> sexp <* ws)
+unquote = inject <$> (ws *> char ',' *> sexp <* ws)
   where
     inject x = Pair (Atom (Symbol "unquote")) (Pair x Nil)
 
@@ -232,9 +232,9 @@ readerMacros = try quote <|> try quasiquote <|> try unquote
 
 sexp :: Parser SExp
 sexp =
-  try readerMacros
+  try nil
+    <|> try readerMacros
     <|> try atom
-    <|> try nil
     <|> try pair
     <|> list
 

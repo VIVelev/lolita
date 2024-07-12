@@ -27,8 +27,8 @@ tests = TestList [
   -- Successful cases
   testCase "Simple atom (symbol)" (Right (Atom (Symbol "abc"))) (fromString "abc"),
   testCase "Simple atom (integer)" (Right (Atom (IntLiteral 123))) (fromString "123"),
-  testCase "Simple atom (boolean true)" (Right (Atom (BoolLiteral True))) (fromString "T"),
-  testCase "Simple atom (boolean false)" (Right (Atom (BoolLiteral False))) (fromString "F"),
+  testCase "Simple atom (boolean true)" (Right (Atom (BoolLiteral True))) (fromString "#t"),
+  testCase "Simple atom (boolean false)" (Right (Atom (BoolLiteral False))) (fromString "#f"),
   testCase "Simple pair" (Right (Pair (Atom (Symbol "a")) (Atom (Symbol "b")))) (fromString "(a . b)"),
   testCase "Simple list" 
     (Right (Pair (Atom (Symbol "a")) (Pair (Atom (Symbol "b")) (Pair (Atom (Symbol "c")) Nil))))
@@ -62,7 +62,7 @@ tests = TestList [
     (fromString "(a '() b '() c)"),
   testCase "List with mixed types"
     (Right (Pair (Atom (Symbol "a")) (Pair (Atom (IntLiteral 123)) (Pair (Atom (BoolLiteral True)) Nil))))
-    (fromString "(a 123 T)"),
+    (fromString "(a 123 #t)"),
   testCase "Large integer" (Right (Atom (IntLiteral 1234567890))) (fromString "1234567890"),
   testCase "Negative integer" (Right (Atom (IntLiteral (-42)))) (fromString "-42"),
   testCase "Symbol with digits" (Right (Atom (Symbol "x123"))) (fromString "x123"),

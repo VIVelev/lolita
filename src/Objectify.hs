@@ -56,9 +56,7 @@ data Variable v = Variable
     -- to be filled by code walkers
     vInfo :: v
   }
-
-instance Eq (Variable v) where
-  v1 == v2 = name v1 == name v2
+  deriving (Eq)
 
 instance Show (Variable ()) where
   show (Variable name False _) = name
@@ -92,6 +90,7 @@ data Program v f
       { root :: P.SExp,
         unquotes :: [(P.SExp, Program v f)]
       }
+  deriving (Eq)
 
 deriving instance Show (Program () ())
 

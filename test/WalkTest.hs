@@ -2,79 +2,59 @@
 -- Credit goes to Claude!
 module WalkTest where
 
-import Objectify (LocalVariable (..), Program (..))
+import Objectify
+import Parse
 import Test.HUnit
-import Walk (insertBox)
+import Walk
+
+-- Helper function to create a test case for walkers
+testWalker :: String -> Program () () -> Program IsFreeMutable FreeVars -> Test
+testWalker name input expected =
+  TestCase $ assertEqual name expected (free . markMutable . recordMutable $ input)
 
 {- ORMOLU_DISABLE -}
 tests :: Test
-tests = TestList
-  [ TestLabel "Test immutable local reference" testImmutableLocalReference
-  , TestLabel "Test mutable local reference" testMutableLocalReference
-  , TestLabel "Test immutable local assignment" testImmutableLocalAssignment
-  , TestLabel "Test mutable local assignment" testMutableLocalAssignment
-  , TestLabel "Test function with mutable variables" testFunctionWithMutableVars
-  , TestLabel "Test nested function" testNestedFunction
+tests = TestList [
+  testWalker "Simple immutable variable"
+    (Function [Variable "x" False ()] [Reference (Variable "x" False ())] ())
+    (Function [Variable "x" False (IsFreeMutable False False)] [Reference (Variable "x" False (IsFreeMutable False False))] (FreeVars [])),
+
+  testWalker "Mutable local variable"
+    (Function [Variable "x" False ()] [Assignment (Variable "x" False ()) (Const (Atom (IntLiteral 1)))] ())
+    (Function [Variable "x" False (IsFreeMutable False True)] [Assignment (Variable "x" False (IsFreeMutable False True)) (Const (Atom (IntLiteral 1)))] (FreeVars [])),
+
+  testWalker "Free variable"
+    (Function [Variable "x" False ()] [Reference (Variable "y" False ())] ())
+    (Function [Variable "x" False (IsFreeMutable False False)] [Reference (Variable "y" False (IsFreeMutable True False))] (FreeVars [Variable "y" False (IsFreeMutable True False)])),
+
+  testWalker "Nested functions with free and mutable variables"
+    (Function [Variable "x" False ()] 
+      [Function [Variable "y" False ()] 
+        [Assignment (Variable "x" False ()) (Const (Atom (IntLiteral 1))),
+         Reference (Variable "z" False ())] ()] ())
+    (Function [Variable "x" False (IsFreeMutable False True)] 
+      [Function [Variable "y" False (IsFreeMutable False False)] 
+        [Assignment (Variable "x" False (IsFreeMutable True True)) (Const (Atom (IntLiteral 1))),
+         Reference (Variable "z" False (IsFreeMutable True False))] 
+        (FreeVars [Variable "x" False (IsFreeMutable True True), Variable "z" False (IsFreeMutable True False)])] 
+      (FreeVars [Variable "z" False (IsFreeMutable True False)])),
+
+  testWalker "Complex nested functions with multiple variables"
+    (Function [Variable "a" False (), Variable "b" False ()] 
+      [Assignment (Variable "a" False ()) (Const (Atom (IntLiteral 1))),
+       Function [Variable "c" False ()] 
+         [Reference (Variable "b" False ()),
+          Assignment (Variable "d" False ()) (Const (Atom (IntLiteral 2))),
+          Reference (Variable "e" False ())] ()] ())
+    (Function [Variable "a" False (IsFreeMutable False True), Variable "b" False (IsFreeMutable False False)] 
+      [Assignment (Variable "a" False (IsFreeMutable False True)) (Const (Atom (IntLiteral 1))),
+       Function [Variable "c" False (IsFreeMutable False False)] 
+         [Reference (Variable "b" False (IsFreeMutable True False)),
+          Assignment (Variable "d" False (IsFreeMutable True True)) (Const (Atom (IntLiteral 2))),
+          Reference (Variable "e" False (IsFreeMutable True False))] 
+         (FreeVars [Variable "b" False (IsFreeMutable True False), Variable "d" False (IsFreeMutable True True), Variable "e" False (IsFreeMutable True False)])] 
+      (FreeVars [Variable "d" False (IsFreeMutable True True), Variable "e" False (IsFreeMutable True False)]))
   ]
-
-testImmutableLocalReference :: Test
-testImmutableLocalReference = TestCase $ assertEqual
-  "Immutable local reference should not be boxed"
-  (LocalReference (LocalVariable "x" False False))
-  (insertBox (LocalReference (LocalVariable "x" False False)))
-
-testMutableLocalReference :: Test
-testMutableLocalReference = TestCase $ assertEqual
-  "Mutable local reference should be boxed"
-  (BoxRead (LocalReference (LocalVariable "x" True False)))
-  (insertBox (LocalReference (LocalVariable "x" True False)))
-
-testImmutableLocalAssignment :: Test
-testImmutableLocalAssignment = TestCase $ assertEqual
-  "Immutable local assignment should not be boxed"
-  (LocalAssignment (LocalReference (LocalVariable "x" False False)) (IntLiteral 5))
-  (insertBox (LocalAssignment (LocalReference (LocalVariable "x" False False)) (IntLiteral 5)))
-
-testMutableLocalAssignment :: Test
-testMutableLocalAssignment = TestCase $ assertEqual
-  "Mutable local assignment should be boxed"
-  (BoxWrite (LocalReference (LocalVariable "x" True False)) (IntLiteral 5))
-  (insertBox (LocalAssignment (LocalReference (LocalVariable "x" True False)) (IntLiteral 5)))
-
-testFunctionWithMutableVars :: Test
-testFunctionWithMutableVars = TestCase $ assertEqual
-  "Function with mutable variables should be boxed"
-  (Function
-    [LocalVariable "x" True False, LocalVariable "y" False False]
-    [ BoxCreate (LocalVariable "x" True False)
-    , BoxWrite (LocalReference (LocalVariable "x" True False)) (IntLiteral 5)
-    , BoxRead (LocalReference (LocalVariable "x" True False))
-    ])
-  (insertBox (Function
-    [LocalVariable "x" True False, LocalVariable "y" False False]
-    [ LocalAssignment (LocalReference (LocalVariable "x" True False)) (IntLiteral 5)
-    , LocalReference (LocalVariable "x" True False)
-    ]))
-
-testNestedFunction :: Test
-testNestedFunction = TestCase $ assertEqual
-  "Nested function should be correctly boxed"
-  (Function
-    [LocalVariable "x" True False]
-    [ BoxCreate (LocalVariable "x" True False)
-    , Function
-        [LocalVariable "y" True False]
-        [ BoxCreate (LocalVariable "y" True False)
-        , BoxWrite (LocalReference (LocalVariable "y" True False)) (BoxRead (LocalReference (LocalVariable "x" True False)))
-        ]
-    ])
-  (insertBox (Function
-    [LocalVariable "x" True False]
-    [ Function
-        [LocalVariable "y" True False]
-        [ LocalAssignment (LocalReference (LocalVariable "y" True False)) (LocalReference (LocalVariable "x" True False))
-        ]
-    ]))
 {- ORMOLU_ENABLE -}
 
 run :: IO Counts

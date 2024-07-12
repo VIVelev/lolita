@@ -10,7 +10,6 @@ import MonadT
     StateT (..),
   )
 import Objectify (Program (..), Variable (..))
-import Parse qualified as P (SExp)
 
 walk :: (Monad m) => Program v1 f1 -> (Program v1 f1 -> m (Program v2 f2)) -> m (Program v2 f2)
 walk (Const q) _ = pure $ Const q
@@ -85,17 +84,23 @@ deriving instance Show (Program IsMutable ())
 markMutable :: Program () WhoIsMutable -> Program IsMutable ()
 markMutable p = runIdentity $ runReaderT (_markMutable p) (WhoIsMutable [])
 
+lookupByName :: Variable v1 -> [(Variable v2, a)] -> Maybe a
+lookupByName v@(Variable {name = n1}) ((Variable {name = n2}, r) : xs)
+  | n1 == n2 = Just r
+  | otherwise = lookupByName v xs
+lookupByName _ [] = Nothing
+
 _markMutable :: Program () WhoIsMutable -> MarkMutableM (Program IsMutable ())
 _markMutable (Reference v) = do
   info <- getWhoIsMutable <$> ask
-  case lookup v info of
+  case lookupByName v info of
     Just b -> return $ Reference $ v {vInfo = IsMutable b}
     Nothing -> return $ Reference $ v {vInfo = IsMutable False}
 -- \^ Note: setting IsMutable to True here essentially guesses that
 -- the global variable is immutable. Can this be improved?
 _markMutable (Assignment v f) = do
   info <- getWhoIsMutable <$> ask
-  case lookup v info of
+  case lookupByName v info of
     Just b -> Assignment (v {vInfo = IsMutable b}) <$> _markMutable f
     Nothing -> Assignment (v {vInfo = IsMutable True}) <$> _markMutable f
 _markMutable (Function _ body info) =
@@ -110,11 +115,14 @@ data IsFreeMutable = IsFreeMutable
   { isFree :: Bool,
     isMutable :: Bool
   }
+  deriving (Eq)
 
 -- | Collection of the free variables encountered in the body
 -- of a function.
-newtype FreeVars = FreeVars [Variable IsFreeMutable]
-  deriving (Show)
+newtype FreeVars = FreeVars
+  { getFreeVars :: [Variable IsFreeMutable]
+  }
+  deriving (Show, Eq, Semigroup, Monoid)
 
 type FreeM = StateT FreeVars (ReaderT [Variable IsMutable] Identity)
 -- ^                                  ^ bounded variables
@@ -138,41 +146,37 @@ deriving instance Show (Program IsFreeMutable FreeVars)
 free :: Program IsMutable () -> Program IsFreeMutable FreeVars
 free p = fst . runIdentity $ runReaderT (runStateT (_free p) (FreeVars [])) []
 
+notIn :: Variable v1 -> [Variable v2] -> Bool
+v `notIn` vs = all ((/= name v) . name) vs
+
 _free :: Program IsMutable () -> FreeM (Program IsFreeMutable FreeVars)
 _free (Reference v@Variable {vInfo = IsMutable isMutable}) = do
   bounded :: [Variable IsMutable] <- ask
-  if v `notElem` bounded
+  if v `notIn` bounded
     then do
       let newVar = v {vInfo = IsFreeMutable True isMutable}
-      modify (add newVar)
+      modify (<> FreeVars [newVar]) -- TODO: appending is not great
       return $ Reference newVar
     else return $ Reference v {vInfo = IsFreeMutable False isMutable}
-  where
-    add var (FreeVars frees) = FreeVars $ var : frees
 _free (Assignment v@Variable {vInfo = IsMutable isMutable} f) = do
   bounded :: [Variable IsMutable] <- ask
-  if v `notElem` bounded
+  if v `notIn` bounded
     then do
       let newVar = v {vInfo = IsFreeMutable True isMutable}
-      modify (add newVar)
+      modify (<> FreeVars [newVar])
       Assignment newVar <$> _free f
     else Assignment v {vInfo = IsFreeMutable False isMutable} <$> _free f
-  where
-    add var (FreeVars frees) = FreeVars $ var : frees
 _free (Function {vars, body}) = do
-  FreeVars outerFree <- get
-  outerBounded <- ask
+  outerFree :: FreeVars <- get
   bbody <-
-    withState (const (FreeVars [])) $
-      local (const vars) (mapM _free body)
-  FreeVars innerFree <- get
-  modify $ const (FreeVars (filter (`notIn` outerBounded) innerFree <> outerFree))
+    put (FreeVars [])
+      >> local (const vars) (mapM _free body)
+  innerFree :: FreeVars <- get
+  outerBounded :: [Variable IsMutable] <- ask
+  put $ outerFree <> (FreeVars . filter (`notIn` outerBounded) . getFreeVars $ innerFree)
   return $
     Function
-      (map (\v@Variable {vInfo = IsMutable isMutable} -> v {vInfo = IsFreeMutable False isMutable}) vars)
+      (map (\v@Variable {vInfo = IsMutable b} -> v {vInfo = IsFreeMutable False b}) vars)
       bbody
-      (FreeVars innerFree)
-  where
-    notIn :: Variable IsFreeMutable -> [Variable IsMutable] -> Bool
-    v `notIn` vs = all ((/= name v) . name) vs
+      innerFree
 _free p = walk p _free
