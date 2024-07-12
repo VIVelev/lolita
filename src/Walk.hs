@@ -2,7 +2,6 @@
 
 module Walk where
 
-import Data.Foldable (find)
 import MonadT
   ( Identity (..),
     MonadReader (..),
@@ -11,11 +10,10 @@ import MonadT
     StateT (..),
   )
 import Objectify (Program (..), Variable (..))
+import Parse qualified as P (SExp)
 
 walk :: (Monad m) => Program v1 f1 -> (Program v1 f1 -> m (Program v2 f2)) -> m (Program v2 f2)
-walk (IntLiteral i) _ = pure $ IntLiteral i
-walk (BoolLiteral b) _ = pure $ BoolLiteral b
-walk Nil _ = pure Nil
+walk (Const q) _ = pure $ Const q
 walk (Reference _) _ = error "this should be implemented by the code walker"
 walk (Assignment _ _) _ = error "this should be implemented by the code walker"
 walk (Alternative pc pt pf) f = Alternative <$> f pc <*> f pt <*> f pf
@@ -107,50 +105,63 @@ _markMutable (Function _ body info) =
         return $ Function newVars bbody ()
 _markMutable p = walk p _markMutable
 
--- | Indicates whether the variable is free or not
-newtype IsFree = IsFree Bool
+-- | Indicates whether the variable is free/mutable.
+data IsFreeMutable = IsFreeMutable
+  { isFree :: Bool,
+    isMutable :: Bool
+  }
 
 -- | Collection of the free variables encountered in the body
 -- of a function.
-newtype FreeVars = FreeVars [Variable ()]
+newtype FreeVars = FreeVars [Variable IsFreeMutable]
   deriving (Show)
 
-type FreeM = StateT FreeVars (ReaderT [Variable ()] Identity)
+type FreeM = StateT FreeVars (ReaderT [Variable IsMutable] Identity)
 -- ^                                  ^ bounded variables
 
-instance Show (Variable IsFree) where
-  show (Variable name False (IsFree False)) = name
-  show (Variable name False (IsFree True)) = "~" ++ name
-  show (Variable name True _) = "g:" ++ name
+instance Show (Variable IsFreeMutable) where
+  show (Variable name False (IsFreeMutable False False)) = name
+  show (Variable name False (IsFreeMutable True False)) = "~" ++ name
+  show (Variable name False (IsFreeMutable False True)) = "*" ++ name
+  show (Variable name False (IsFreeMutable True True)) = "~*" ++ name
+  show (Variable name True (IsFreeMutable _ False)) = "g:" ++ name
+  show (Variable name True (IsFreeMutable _ True)) = "*g:" ++ name
 
-deriving instance Show (Program IsFree FreeVars)
+deriving instance Show (Program IsFreeMutable FreeVars)
 
 -- | Collect and mark the free variables in a function.
-free :: Program () () -> Program IsFree FreeVars
+--
+-- Note: This stage could be performed together with `markMutable`,
+-- however I am going to keep them separate for simplicity. Also,
+-- performing `markMutable` and then `free` is an arbitrary choice.
+-- Swapping the order won't change anything.
+free :: Program IsMutable () -> Program IsFreeMutable FreeVars
 free p = fst . runIdentity $ runReaderT (runStateT (_free p) (FreeVars [])) []
 
-_free :: Program () () -> FreeM (Program IsFree FreeVars)
-_free (Reference v) = do
-  bounded :: [Variable ()] <- ask
-  case find ((== name v) . name) bounded of
-    Just _ -> return $ Reference v {vInfo = IsFree False}
-    Nothing -> do
-      modify (add v)
-      return $ Reference v {vInfo = IsFree True}
+_free :: Program IsMutable () -> FreeM (Program IsFreeMutable FreeVars)
+_free (Reference v@Variable {vInfo = IsMutable isMutable}) = do
+  bounded :: [Variable IsMutable] <- ask
+  if v `notElem` bounded
+    then do
+      let newVar = v {vInfo = IsFreeMutable True isMutable}
+      modify (add newVar)
+      return $ Reference newVar
+    else return $ Reference v {vInfo = IsFreeMutable False isMutable}
   where
     add var (FreeVars frees) = FreeVars $ var : frees
-_free (Assignment v f) = do
-  bounded :: [Variable ()] <- ask
-  case find ((== name v) . name) bounded of
-    Just _ -> Assignment v {vInfo = IsFree False} <$> _free f
-    Nothing -> do
-      modify (add v)
-      Assignment v {vInfo = IsFree True} <$> _free f
+_free (Assignment v@Variable {vInfo = IsMutable isMutable} f) = do
+  bounded :: [Variable IsMutable] <- ask
+  if v `notElem` bounded
+    then do
+      let newVar = v {vInfo = IsFreeMutable True isMutable}
+      modify (add newVar)
+      Assignment newVar <$> _free f
+    else Assignment v {vInfo = IsFreeMutable False isMutable} <$> _free f
   where
-    add var (FreeVars vs) = FreeVars $ var : vs
+    add var (FreeVars frees) = FreeVars $ var : frees
 _free (Function {vars, body}) = do
   FreeVars outerFree <- get
-  outerBounded :: [Variable ()] <- ask
+  outerBounded <- ask
   bbody <-
     withState (const (FreeVars [])) $
       local (const vars) (mapM _free body)
@@ -158,19 +169,10 @@ _free (Function {vars, body}) = do
   modify $ const (FreeVars (filter (`notIn` outerBounded) innerFree <> outerFree))
   return $
     Function
-      (map (\v -> v {vInfo = IsFree False}) vars)
+      (map (\v@Variable {vInfo = IsMutable isMutable} -> v {vInfo = IsFreeMutable False isMutable}) vars)
       bbody
       (FreeVars innerFree)
   where
+    notIn :: Variable IsFreeMutable -> [Variable IsMutable] -> Bool
     v `notIn` vs = all ((/= name v) . name) vs
 _free p = walk p _free
-
--- instance Show (Variable MarkVInfo) where
---   show (Variable name False (MarkVInfo False False)) = name
---   show (Variable name False (MarkVInfo True False)) = "*" ++ name
---   show (Variable name False (MarkVInfo False True)) = "~" ++ name
---   show (Variable name False (MarkVInfo True True)) = "~*" ++ name
---   show (Variable name True (MarkVInfo False False)) = "g:" ++ name
---   show (Variable name True (MarkVInfo True False)) = "*g:" ++ name
---   show (Variable name True (MarkVInfo False True)) = "~g:" ++ name
---   show (Variable name True (MarkVInfo True True)) = "~*g:" ++ name

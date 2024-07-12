@@ -65,9 +65,7 @@ instance Show (Variable ()) where
   show (Variable name True _) = "g:" ++ name
 
 data Program v f
-  = IntLiteral Integer
-  | BoolLiteral Bool
-  | Nil
+  = Const P.SExp
   | Reference (Variable v)
   | Assignment (Variable v) (Program v f)
   | Alternative
@@ -98,9 +96,6 @@ data Program v f
 deriving instance Show (Program () ())
 
 evaluate :: Program () () -> Evaluate P.SExp
-evaluate (IntLiteral i) = return $ P.Atom (P.IntLiteral i)
-evaluate (BoolLiteral b) = return $ P.Atom (P.BoolLiteral b)
-evaluate Nil = return P.Nil
 evaluate (Reference var) = do
   env <- ask
   case lookup var (rLocals env) of
@@ -127,8 +122,9 @@ evaluate q@(QuasiQuote {root, unquotes}) =
 evaluate _ = throwError "Not yet implemented"
 
 objectify :: P.SExp -> ObjectifyM (Program () ())
-objectify (P.Atom (P.IntLiteral i)) = return $ IntLiteral i
-objectify (P.Atom (P.BoolLiteral b)) = return $ BoolLiteral b
+objectify q@(P.Atom (P.IntLiteral _)) = return $ Const q
+objectify q@(P.Atom (P.BoolLiteral _)) = return $ Const q
+objectify q@P.Nil = return $ Const q
 objectify (P.Atom (P.Symbol name)) = do
   LocalPrepEnv locals <- ask
   case lookup name locals of
@@ -145,7 +141,6 @@ objectify (P.Atom (P.Symbol name)) = do
              in do
                   modify (\r@GlobalPrepEnv {variables = vs} -> r {variables = (name, var) : vs})
                   return ref
-objectify P.Nil = return Nil
 objectify e@(P.Pair car cdr) = do
   m <- objectify car
   case m of
@@ -267,7 +262,7 @@ defmacro =
                   let newKeyword = Keyword {symbol = name, handler = invoke expanderProgram . P.cdr}
                    in do
                         modify (\r@GlobalPrepEnv {keywords = kw} -> r {keywords = (name, newKeyword) : kw})
-                        return $ BoolLiteral True
+                        return $ Const $ P.Atom (P.BoolLiteral True)
             _ -> throwError "Invalid macro name: expected a symbol"
         _ -> throwError "Invalid defmacro syntax: expected (defmacro (name <variables>) <body>)"
     }
