@@ -1,3 +1,4 @@
+{-# LANGUAGE DuplicateRecordFields #-}
 {-# OPTIONS_GHC -Wno-orphans #-}
 
 module Walk where
@@ -10,6 +11,7 @@ import MonadT
     StateT (..),
   )
 import Objectify (Program (..), Variable (..))
+import Parse qualified as P (SExp (..))
 
 walk :: (Monad m) => Program v1 f1 -> (Program v1 f1 -> m (Program v2 f2)) -> m (Program v2 f2)
 walk (Const q) _ = pure $ Const q
@@ -111,10 +113,7 @@ _markMutable (Function _ body info) =
 _markMutable p = walk p _markMutable
 
 -- | Indicates whether the variable is free/mutable.
-data IsFreeMutable = IsFreeMutable
-  { isFree :: Bool,
-    isMutable :: Bool
-  }
+data IsFreeMutable = IsFreeMutable Bool Bool
   deriving (Eq)
 
 -- | Collection of the free variables encountered in the body
@@ -122,7 +121,10 @@ data IsFreeMutable = IsFreeMutable
 newtype FreeVars = FreeVars
   { getFreeVars :: [Variable IsFreeMutable]
   }
-  deriving (Show, Eq, Semigroup, Monoid)
+  deriving (Eq, Semigroup, Monoid)
+
+instance Show FreeVars where
+  show (FreeVars vs) = "FreeVars " ++ show vs
 
 type FreeM = StateT FreeVars (ReaderT [Variable IsMutable] Identity)
 -- ^                                  ^ bounded variables
@@ -180,3 +182,70 @@ _free (Function {vars, body}) = do
       bbody
       innerFree
 _free p = walk p _free
+
+type IsFreeMutableOrQuote = Either P.SExp IsFreeMutable
+
+instance Show (Variable IsFreeMutableOrQuote) where
+  show v@Variable {vInfo = Right i} = show $ v {vInfo = i}
+  show Variable {name, vInfo = Left _} = "#" ++ name
+
+fromIsFreeMutable :: Variable IsFreeMutable -> Variable IsFreeMutableOrQuote
+fromIsFreeMutable v@Variable {vInfo} = v {vInfo = Right vInfo}
+
+data IndexFreeVars = IndexFreeVars
+  { index :: Int,
+    freeVars :: [Variable IsFreeMutableOrQuote]
+  }
+  deriving (Show)
+
+deriving instance Show (Program IsFreeMutableOrQuote IndexFreeVars)
+
+data FunctionDefinition = FunctionDefinition
+  { vars :: [Variable IsFreeMutableOrQuote],
+    body :: [Program IsFreeMutableOrQuote IndexFreeVars],
+    freeVars :: [Variable IsFreeMutableOrQuote],
+    index :: Int
+  }
+  deriving (Show)
+
+data Quotation = Quotation Int P.SExp
+  deriving (Show)
+
+data FlattenedProgram = FlattenedProgram
+  { form :: Program IsFreeMutableOrQuote IndexFreeVars,
+    definitions :: [FunctionDefinition],
+    quotations :: [Quotation]
+  }
+  deriving (Show)
+
+type ExtractM = StateT ([FunctionDefinition], [Quotation]) Identity
+
+-- | Extract quotations and function definitions
+extract :: Program IsFreeMutable FreeVars -> FlattenedProgram
+extract p =
+  let (form, (definitions, quotations)) = (runIdentity $ runStateT (_extract p) ([], []))
+      index = length definitions
+      definitions_ = FunctionDefinition [] [form] [] index : definitions
+      form_ = Application (Function [] [] (IndexFreeVars index [])) []
+   in FlattenedProgram form_ definitions_ quotations
+
+_extract :: Program IsFreeMutable FreeVars -> ExtractM (Program IsFreeMutableOrQuote IndexFreeVars)
+_extract (Const c) = do
+  (ds :: [FunctionDefinition], qs) <- get
+  let index = length qs
+  let q = Quotation index c
+  put (ds, q : qs)
+  return $ Reference $ Variable (show index) False (Left c)
+_extract (Reference v) = pure $ Reference (fromIsFreeMutable v)
+_extract (Assignment v f) = Assignment (fromIsFreeMutable v) <$> _extract f
+_extract (Function vars body (FreeVars fvars)) =
+  let vars_ = map fromIsFreeMutable vars
+      fvars_ = map fromIsFreeMutable fvars
+   in do
+        body_ <- mapM _extract body
+        (ds, qs :: [Quotation]) <- get
+        let index = length ds
+        let def = FunctionDefinition vars_ body_ fvars_ index
+        put (def : ds, qs)
+        return $ Function vars_ [] (IndexFreeVars index fvars_)
+_extract p = walk p _extract

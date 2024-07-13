@@ -28,6 +28,7 @@ library
     exposed-modules:  Parse, Objectify, Walk
     other-modules:    MonadT
     build-depends:    base,
+                      pretty-simple
     default-language: GHC2021
 
 executable lolita
