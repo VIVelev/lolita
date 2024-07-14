@@ -59,7 +59,20 @@
      - [x] unquote
 
 ## Jul 11, 2024
-   - [ ] Refactor code walking stages via type parameters
+   - [x] Refactor code walking stages via type parameters
+
+## Jul 12, 2024
+   - [x] Code walker for collecting function definitions
+   - [x] Code walker for collecting quotes
+
+## Jul 13, 2024
+   - [x] C Codegen!
+     - [x] generate header
+     - [x] generate trailer
+     - [x] generate global environment and variables
+       - [x] Some Scheme identifiers are invalid C identifiers,
+         so a proper conversion needs to be implemented.
+     - [x] Codegen quotations
 
 ## Long term
 

@@ -1,4 +1,3 @@
-{-# LANGUAGE DuplicateRecordFields #-}
 {-# OPTIONS_GHC -Wno-orphans #-}
 
 module Walk where
@@ -14,7 +13,7 @@ import Objectify (Program (..), Variable (..))
 import Parse qualified as P (SExp (..))
 
 walk :: (Monad m) => Program v1 f1 -> (Program v1 f1 -> m (Program v2 f2)) -> m (Program v2 f2)
-walk (Const q) _ = pure $ Const q
+walk (Const e) _ = pure $ Const e
 walk (Reference _) _ = error "this should be implemented by the code walker"
 walk (Assignment _ _) _ = error "this should be implemented by the code walker"
 walk (Alternative pc pt pf) f = Alternative <$> f pc <*> f pt <*> f pf
@@ -22,7 +21,6 @@ walk (Sequence ps) f = Sequence <$> mapM f ps
 walk (Function {}) _ = error "this should be implemented by the code walker"
 walk (Application func args) f = Application <$> f func <*> mapM f args
 walk (Magic k) _ = pure $ Magic k
-walk (Quote e) _ = pure $ Quote e
 walk (QuasiQuote {}) _ = error "TODO: what to do here?"
 
 -- | Keeps record of who (which local variable) is mutable.
@@ -49,7 +47,7 @@ _recordMutable (Assignment v f) = do
       | name var == name vv = WhoIsMutable $ (vv, True) : vs
       | otherwise = WhoIsMutable $ h : getWhoIsMutable (mark var (WhoIsMutable vs))
     mark _ empty = empty
-_recordMutable (Function {vars, body}) =
+_recordMutable (Function {Objectify.vars, Objectify.body}) =
   let info0 = WhoIsMutable $ map (,False) vars
    in do
         modify (info0 <>)
@@ -168,7 +166,7 @@ _free (Assignment v@Variable {vInfo = IsMutable isMutable} f) = do
       modify (<> FreeVars [newVar])
       Assignment newVar <$> _free f
     else Assignment v {vInfo = IsFreeMutable False isMutable} <$> _free f
-_free (Function {vars, body}) = do
+_free (Function {Objectify.vars, Objectify.body}) = do
   outerFree :: FreeVars <- get
   bbody <-
     put (FreeVars [])
@@ -192,10 +190,7 @@ instance Show (Variable IsFreeMutableOrQuote) where
 fromIsFreeMutable :: Variable IsFreeMutable -> Variable IsFreeMutableOrQuote
 fromIsFreeMutable v@Variable {vInfo} = v {vInfo = Right vInfo}
 
-data IndexFreeVars = IndexFreeVars
-  { index :: Int,
-    freeVars :: [Variable IsFreeMutableOrQuote]
-  }
+data IndexFreeVars = IndexFreeVars Int [Variable IsFreeMutableOrQuote]
   deriving (Show)
 
 deriving instance Show (Program IsFreeMutableOrQuote IndexFreeVars)

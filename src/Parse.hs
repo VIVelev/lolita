@@ -100,9 +100,6 @@ try p = do
     put original
     empty
 
-zeroOrOne :: (Monoid a) => Parser a -> Parser a
-zeroOrOne p = try p <|> pure mempty
-
 char :: Char -> Parser Char
 char c = satisfy (== c) (printf "expected '%c'" c)
 
@@ -151,12 +148,14 @@ data AKind
   = Symbol String
   | IntLiteral Integer
   | BoolLiteral Bool
+  | StringLiteral String
   deriving (Eq)
 
 instance Show AKind where
   show (Symbol n) = n
   show (IntLiteral i) = show i
   show (BoolLiteral b) = show b
+  show (StringLiteral s) = "\"" ++ s ++ "\""
 
 -- | Whitespaces
 ws :: Parser String
@@ -166,7 +165,9 @@ digits :: String
 digits = "0123456789"
 
 alphabet :: String
-alphabet = "abcdefghijklmnopqrstuvwxyz"
+alphabet =
+  "abcdefghijklmnopqrstuvwxyz"
+    ++ "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
 misc :: String
 misc = "-!?=*+"
@@ -186,12 +187,15 @@ boolean = toBool <$> (ws *> try (string "#t") <|> try (string "#f") <* ws)
   where
     toBool = BoolLiteral . (== "#t")
 
+stringLiteral :: Parser AKind
+stringLiteral = StringLiteral <$> (ws *> char '"' *> some (oneOf alphabet) <* char '"' <* ws)
+
 symbol :: Parser AKind
 symbol = Symbol <$> (ws *> some (oneOf $ alphabet ++ digits ++ misc) <* ws)
 
 -- | Atom
 atom :: Parser SExp
-atom = Atom <$> try integer <|> try boolean <|> try symbol
+atom = Atom <$> try integer <|> try boolean <|> try stringLiteral <|> try symbol
 
 -- Pair
 pair :: Parser SExp
@@ -199,14 +203,15 @@ pair = parens $ Pair <$> sexp <* ws <* char '.' <* ws <*> sexp
 
 -- | Nil
 nil :: Parser SExp
-nil = Nil <$ (ws *> zeroOrOne (string "'") *> string "()" <* ws)
+nil = Nil <$ (ws *> (try (string "'") <|> pure "") *> string "()" <* ws)
 
 -- | LISP list constructor, i.e. (x ...)
 -- Should satisfy: (a b c) is equivalent to (a . (b . (c . '())))
 list :: Parser SExp
 list = parens $ do
   elements <- some (ws *> sexp <* ws)
-  return $ foldr Pair Nil elements
+  end <- try (char '.' *> ws *> sexp) <|> pure Nil
+  return $ foldr Pair end elements
 
 -- | Reader quote
 quote :: Parser SExp
@@ -238,5 +243,4 @@ sexp =
     <|> try pair
     <|> list
 
--- Otherthings to support:
---   - [ ] Support splatting `,@`
+-- - [ ] Support splatting `,@`

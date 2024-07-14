@@ -1,4 +1,1 @@
-(lambda (x)
-  x
-  (lambda () (set! x 1))
-  y)
+'((#f #t) (foo . "foo") 33 foo . "foo")

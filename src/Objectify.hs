@@ -26,8 +26,10 @@ data GlobalPrepEnv = GlobalPrepEnv
 
 type ObjectifyM = ErrorT String (ReaderT LocalPrepEnv (StateT GlobalPrepEnv Identity))
 
-runObjectify :: ObjectifyM a -> (LocalPrepEnv, GlobalPrepEnv) -> Either Error a
-runObjectify obj (l, g) = fst <$> runIdentity $ runStateT (runReaderT (runErrorT obj) l) g
+runObjectify :: ObjectifyM a -> (LocalPrepEnv, GlobalPrepEnv) -> Either Error (a, [Variable ()])
+runObjectify obj (l, g) = case runIdentity $ runStateT (runReaderT (runErrorT obj) l) g of
+  (Right a, env) -> Right (a, map snd (variables env))
+  (Left e, _) -> Left e
 
 data RunTimeEnv = RunTimeEnv
   { rLocals :: [(Variable (), P.SExp)],
@@ -85,8 +87,7 @@ data Program v f
   | -- | This is a special case, as you may guess from the name.
     Magic Keyword
   | -- | Quoting is vital for a language to support macros.
-    Quote P.SExp
-  | QuasiQuote
+    QuasiQuote
       { root :: P.SExp,
         unquotes :: [(P.SExp, Program v f)]
       }
@@ -95,6 +96,7 @@ data Program v f
 deriving instance Show (Program () ())
 
 evaluate :: Program () () -> Evaluate P.SExp
+evaluate (Const e) = return e
 evaluate (Reference var) = do
   env <- ask
   case lookup var (rLocals env) of
@@ -109,7 +111,6 @@ evaluate (Alternative ec et ef) = do
     (P.Atom (P.BoolLiteral False)) -> evaluate ef
     _ -> throwError "Value is not boolyfiable"
 evaluate (Sequence p) = foldl1 (>>) (map evaluate p)
-evaluate (Quote e) = return e
 evaluate q@(QuasiQuote {root, unquotes}) =
   case root of
     P.Pair (P.Atom (P.Symbol "unquote")) (P.Pair x P.Nil) ->
@@ -123,6 +124,7 @@ evaluate _ = throwError "Not yet implemented"
 objectify :: P.SExp -> ObjectifyM (Program () ())
 objectify q@(P.Atom (P.IntLiteral _)) = return $ Const q
 objectify q@(P.Atom (P.BoolLiteral _)) = return $ Const q
+objectify q@(P.Atom (P.StringLiteral _)) = return $ Const q
 objectify q@P.Nil = return $ Const q
 objectify (P.Atom (P.Symbol name)) = do
   LocalPrepEnv locals <- ask
@@ -227,7 +229,7 @@ quote :: Keyword
 quote =
   Keyword
     { symbol = "quote",
-      handler = pure . Quote . P.cadr
+      handler = pure . Const . P.cadr
     }
 
 -- | (quasiquote ...)
@@ -257,7 +259,7 @@ defmacro =
             P.Pair (P.Atom (P.Symbol name)) vars -> do
               case runObjectify (objectifyWithScope vars body) defaultPrepEnv of
                 Left err -> throwError $ "Error in macro definition: " ++ err
-                Right expanderProgram ->
+                Right (expanderProgram, _) ->
                   let newKeyword = Keyword {symbol = name, handler = invoke expanderProgram . P.cdr}
                    in do
                         modify (\r@GlobalPrepEnv {keywords = kw} -> r {keywords = (name, newKeyword) : kw})
@@ -315,6 +317,6 @@ defaultRunTimeEnv =
 eval :: P.SExp -> IO ()
 eval e = case runObjectify (objectify e) defaultPrepEnv of
   Left err -> print $ "comptime errro: " ++ err
-  Right obj -> case runEvaluate (evaluate obj) defaultRunTimeEnv of
+  Right (obj, _) -> case runEvaluate (evaluate obj) defaultRunTimeEnv of
     Left err -> print $ "runtime error: " ++ show err
     Right res -> print res
