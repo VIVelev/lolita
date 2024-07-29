@@ -25,7 +25,9 @@ compileToC e outname =
 genHeader :: Handle -> P.SExp -> IO ()
 genHeader h expr = do
   hPutStrLn h "/* Compiler to C, Version 0.1 */"
-  hPrintf h "/* Source expression:\n  %s */\n\n" (show expr)
+  hPrintf h "/* Source expression:\n  %s */\n" (show expr)
+  hPutStrLn h "#include \"scheme.h\""
+  hPutStrLn h ""
 
 genTrailer :: Handle -> IO ()
 genTrailer h = do
@@ -71,13 +73,13 @@ scanQuotations h qs@(q@(Quotation index value) : rest) i done =
       scanQuotations h rest i (q : done)
     genNew (P.Atom (P.StringLiteral str)) = do
       hPrintf h "SCM_DefineString(thing%d_object, \"%s\");\n" index str
-      hPrintf h "#define thing%d SCM_Wrap(thing%d_object)\n" index index
+      hPrintf h "#define thing%d SCM_Wrap(&thing%d_object)\n" index index
       scanQuotations h rest i (q : done)
     genNew (P.Atom (P.Symbol sym)) =
       case find (\(Quotation _ v) -> v == P.Atom (P.StringLiteral sym)) done of
         Just (Quotation otherIndex _) -> do
           hPrintf h "SCM_DefineSymbol(thing%d_object, thing%d); /* %s */\n" index otherIndex sym
-          hPrintf h "#define thing%d SCM_Wrap(thing%d_object)\n" index index
+          hPrintf h "#define thing%d SCM_Wrap(&thing%d_object)\n" index index
           scanQuotations h rest i (q : done)
         Nothing ->
           let newq = Quotation i (P.Atom (P.StringLiteral sym))
@@ -96,7 +98,7 @@ scanQuotations h qs@(q@(Quotation index value) : rest) i done =
               aIndex
               dIndex
               (show value)
-            hPrintf h "#define thing%d SCM_Wrap(thing%d_object)\n" index index
+            hPrintf h "#define thing%d SCM_Wrap(&thing%d_object)\n" index index
             scanQuotations h rest i (q : done)
           Nothing ->
             let newq = Quotation i a

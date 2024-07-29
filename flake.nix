@@ -13,6 +13,9 @@
           cabal-install
           haskell-language-server
         ];
+        nativeBuildInputs = with pkgs; [
+          clang-tools
+        ];
       };
     };
 }
