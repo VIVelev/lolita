@@ -1,1 +1,1 @@
-'((#f #t) (foo . "foo") 33 foo . "foo")
+((lambda () 1))

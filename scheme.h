@@ -15,7 +15,7 @@ union SCM_object {
     SCM car;
   } pair;
   struct SCM_string {
-    char Cstring[8];
+    char Cstring[1];
   } string;
   struct SCM_symbol {
     SCM pname;
@@ -39,6 +39,8 @@ enum SCM_tag {
 
 enum SCM_err {
   SCM_ERR_CANT_ALLOC = 1,
+  SCM_ERR_NOT_CALLABLE = 2,
+  SCM_ERR_INCORRECT_ARITY = 3,
 };
 
 #define SCM_error(code) SCM_signal_error(code, __LINE__, __FILE__)
@@ -64,7 +66,7 @@ union SCM_unwrapped_object {
   } pair;
   struct SCM_unwrapped_string {
     union SCM_header header;
-    char Cstring[8];
+    char Cstring[1];
   } string;
   struct SCM_unwrapped_symbol {
     union SCM_header header;
@@ -141,7 +143,7 @@ SCM SCM_close(SCM (*Cfunction)(void), long arity, unsigned long size, ...) {
   va_list args;
   if (result == (SCMRef)NULL)
     SCM_error(SCM_ERR_CANT_ALLOC);
-  result->closure.header = {SCM_CLOSURE_TAG};
+  result->closure.header.tag = SCM_CLOSURE_TAG;
   result->closure.arity = arity;
   result->closure.behaviour = Cfunction;
   va_start(args, size);
@@ -151,9 +153,55 @@ SCM SCM_close(SCM (*Cfunction)(void), long arity, unsigned long size, ...) {
   return SCM_Wrap(result);
 }
 
-#define SCM_invoke0(f) SCM_invoke(0, f)
-#define SCM_invoke1(f, x) SCM_invoke(1, f, x)
-#define SCM_invoke2(f, x, y) SCM_invoke(2, f, x, y)
-#define SCM_invoke3(f, x, y, z) SCM_invoke(3, f, x, y, z)
+SCM SCM_invoke(SCM f, unsigned long arity, ...) {
+  SCMRef func = SCM_Unwrap(f);
+  if (func->object.header.tag != SCM_CLOSURE_TAG)
+    SCM_error(SCM_ERR_NOT_CALLABLE);
 
-SCM SCM_invoke(unsigned long arity, SCM f, ...) {}
+  if (func->closure.arity != arity)
+    SCM_error(SCM_ERR_INCORRECT_ARITY);
+
+  va_list args;
+  va_start(args, arity);
+  SCM (*behaviour)(struct SCM_closure *, unsigned long, va_list);
+  behaviour = (SCM(*)(struct SCM_closure *, unsigned long,
+                      va_list))func->closure.behaviour;
+  SCM result = behaviour((struct SCM_closure *)f, arity, args);
+  va_end(args);
+  return result;
+}
+
+SCM SCM_print(SCM obj) {
+  if (SCM_FixnumP(obj)) {
+    printf("%ld", SCM_Fixnum2int(obj));
+  } else if (SCM_NullP(obj)) {
+    printf("()");
+  } else if (SCM_PairP(obj)) {
+    printf("(");
+    SCM_print(SCM_Car(obj));
+    SCM current = SCM_Cdr(obj);
+    while (SCM_PairP(current)) {
+      printf(" ");
+      SCM_print(SCM_Car(current));
+      current = SCM_Cdr(current);
+    }
+    if (!SCM_NullP(current)) {
+      printf(" . ");
+      SCM_print(current);
+    }
+    printf(")");
+  } else if (SCM_SymbolP(obj)) {
+    SCM_print(SCM_Unwrap(obj)->symbol.pname);
+  } else if (SCM_StringP(obj)) {
+    printf("\"%s\"", SCM_Unwrap(obj)->string.Cstring);
+  } else if (SCM_EqP(obj, SCM_true)) {
+    printf("#t");
+  } else if (SCM_EqP(obj, SCM_false)) {
+    printf("#f");
+  } else if (SCM_2tag(obj) == SCM_CLOSURE_TAG) {
+    printf("#<procedure>");
+  } else {
+    printf("#<unknown>");
+  }
+  return SCM_nil; // Convention: return SCM_nil after printing
+}

@@ -19,7 +19,7 @@ compileToC e outname =
             genGlobEnv h globs
             genQuotations h (quotations prog)
             genFunctions h (definitions prog)
-            -- genMain h (form prog)
+            genMain h (form prog)
             genTrailer h
             hClose h
     Left err -> print err
@@ -158,10 +158,11 @@ toC h (Function vars _ (IndexFreeVars index freeVars)) =
 toC h (Application func args) =
   let n = length args
    in do
-        hPrintf h "SCM_invoke(%d, " n
+        hPutStr h "SCM_invoke("
         toC h func
+        hPrintf h ", %d" n 
         compileArgs args
-        hPutStrLn h ");"
+        hPutStr h ")"
   where
     compileArgs (a : as) = do
       hPutStr h ", "
@@ -183,9 +184,19 @@ declareFunction h (FunctionDefinition vars body _ index) = do
   mapM_ (hPrintf h "  SCM_DeclareLocalVariable(%s);\n" . name) vars
   hPutStr h "  return "
   mapM_ (toC h) body
-  hPutStrLn h "}\n"
+  hPutStr h ";"
+  hPutStrLn h "\n}\n"
 
 genFunctions :: Handle -> [FunctionDefinition] -> IO ()
 genFunctions h ds = do
   hPutStrLn h "/* Functions */"
   mapM_ (\d -> defineClosure h d >> declareFunction h d) (reverse ds)
+
+genMain :: Handle -> Program IsFreeMutableOrQuote IndexFreeVars -> IO ()
+genMain h form = do
+  hPutStrLn h "/* Main */"
+  hPutStrLn h "int main() {"
+  hPutStr h "  SCM_print("
+  toC h form
+  hPutStrLn h ");"
+  hPutStrLn h "  exit(0);\n}\n"
