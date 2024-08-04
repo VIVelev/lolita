@@ -1,3 +1,7 @@
+#include <stdarg.h>
+#include <stdio.h>
+#include <stdlib.h>
+
 #define SCM_FixnumP(x) ((unsigned long)(x) & (unsigned long)1)
 #define SCM_Fixnum2int(x) ((long)(x) >> 1)
 #define SCM_Int2fixnum(i) ((SCM)((i << 1) | 1))
@@ -16,17 +20,11 @@ union SCM_object {
   struct SCM_symbol {
     SCM pname;
   } symbol;
-  struct SCM_box {
-    SCM content;
-  } box;
   struct SCM_closure {
     SCM (*behaviour)();
     long arity;
     SCM environment[1];
   } closure;
-  struct SCM_escape {
-    struct SCM_jmp_buf *stack_address;
-  } escape;
 };
 
 enum SCM_tag {
@@ -36,10 +34,19 @@ enum SCM_tag {
   SCM_UNDEF_TAG = 0xaaa3,
   SCM_SYMBOL_TAG = 0xaaa4,
   SCM_STRING_TAG = 0xaaa5,
-  SCM_SUBR_TAG = 0xaaa6,
-  SCM_CLOSURE_TAG = 0xaaa7,
-  SCM_ESCAPE_TAG = 0xaaa8,
+  SCM_CLOSURE_TAG = 0xaaa6,
 };
+
+enum SCM_err {
+  SCM_ERR_CANT_ALLOC = 1,
+};
+
+#define SCM_error(code) SCM_signal_error(code, __LINE__, __FILE__)
+SCM SCM_signal_error(unsigned long code, unsigned long line, char *file) {
+  fflush(stdout);
+  fprintf(stderr, "Error %lu, Line %lu, File %s. \n", code, line, file);
+  exit(code);
+}
 
 union SCM_header {
   enum SCM_tag tag;
@@ -69,15 +76,11 @@ union SCM_unwrapped_object {
     long arity;
     SCM environment[1];
   } closure;
-  struct SCM_unwrapped_escape {
-    union SCM_header header;
-    struct SCM_jmp_buf *stack_address;
-  } escape;
 };
 
 #define SCM_Wrap(x) ((SCM)(((union SCM_header *)x) + 1))
 #define SCM_Unwrap(x) ((SCMRef)(((union SCM_header *)x) - 1))
-#define SCM_2tag(x) ((SCM_Unwrap((SCM)x))->object.heaer.tag)
+#define SCM_2tag(x) ((SCM_Unwrap((SCM)x))->object.header.tag)
 #define SCM_CfunctionAddress(Cfunction) ((SCM(*)(void))Cfunction)
 
 #define SCM_DefinePair(pair, car, cdr)                                         \
@@ -99,6 +102,18 @@ SCM_DefineDirectObject(SCM_nil_object, SCM_NULL_TAG);
 #define SCM_false SCM_Wrap(&SCM_false_object)
 #define SCM_nil SCM_Wrap(&SCM_nil_object)
 
+#define SCM_DefineClosure(Cname, fields)                                       \
+  struct Cname {                                                               \
+    SCM (*behaviour)(void);                                                    \
+    long arity;                                                                \
+    fields                                                                     \
+  }
+
+#define SCM_DeclareFunction(Cname)                                             \
+  SCM Cname(struct Cname *self_, unsigned long size_, va_list arguments_)
+#define SCM_DeclareLocalVariable(Cname) SCM Cname = va_arg(arguments_, SCM)
+#define SCM_Free(Cname) (self_->Cname)
+
 #define SCM_2bool(i) ((i) ? SCM_true : SCM_false)
 
 #define SCM_Car(x) (SCM_Unwrap(x)->pair.car)
@@ -108,3 +123,37 @@ SCM_DefineDirectObject(SCM_nil_object, SCM_NULL_TAG);
 #define SCM_SymbolP(x) ((!SCM_FixnumP(x)) && (SCM_2tag(x) == SCM_SYMBOL_TAG))
 #define SCM_StringP(x) ((!SCM_FixnumP(x)) && (SCM_2tag(x) == SCM_STRING_TAG))
 #define SCM_EqP(x, y) (x == y)
+
+SCM SCM_cons(SCM x, SCM y) {
+  SCMRef cell = (SCMRef)malloc(sizeof(struct SCM_unwrapped_pair));
+  if (cell == (SCMRef)NULL)
+    SCM_error(SCM_ERR_CANT_ALLOC);
+  cell->pair.header.tag = SCM_PAIR_TAG;
+  cell->pair.car = x;
+  cell->pair.cdr = x;
+  return SCM_Wrap(cell);
+}
+
+SCM SCM_close(SCM (*Cfunction)(void), long arity, unsigned long size, ...) {
+  SCMRef result = (SCMRef)malloc(sizeof(struct SCM_unwrapped_closure) +
+                                 (size - 1) * sizeof(SCM));
+  unsigned long i;
+  va_list args;
+  if (result == (SCMRef)NULL)
+    SCM_error(SCM_ERR_CANT_ALLOC);
+  result->closure.header = {SCM_CLOSURE_TAG};
+  result->closure.arity = arity;
+  result->closure.behaviour = Cfunction;
+  va_start(args, size);
+  for (i = 0; i < size; i++)
+    result->closure.environment[i] = va_arg(args, SCM);
+  va_end(args);
+  return SCM_Wrap(result);
+}
+
+#define SCM_invoke0(f) SCM_invoke(0, f)
+#define SCM_invoke1(f, x) SCM_invoke(1, f, x)
+#define SCM_invoke2(f, x, y) SCM_invoke(2, f, x, y)
+#define SCM_invoke3(f, x, y, z) SCM_invoke(3, f, x, y, z)
+
+SCM SCM_invoke(unsigned long arity, SCM f, ...) {}

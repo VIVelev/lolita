@@ -18,6 +18,8 @@ compileToC e outname =
             genHeader h e
             genGlobEnv h globs
             genQuotations h (quotations prog)
+            genFunctions h (definitions prog)
+            -- genMain h (form prog)
             genTrailer h
             hClose h
     Left err -> print err
@@ -110,3 +112,80 @@ scanQuotations h qs@(q@(Quotation index value) : rest) i done =
     genAlias to =
       hPrintf h "#define thing%d thing%d /* %s */\n" index to (show value)
 scanQuotations _ [] _ _ = pure ()
+
+toC :: Handle -> Program IsFreeMutableOrQuote IndexFreeVars -> IO ()
+toC _ (Const _) = error "Const can't be compiled to C."
+-- TODO: Handle boxes
+toC h (Reference v) =
+  let name' = name v
+   in case vInfo v of
+        Left _ -> hPrintf h "thing%s" name'
+        Right (IsFreeMutable isFree _)
+          | isFree -> hPrintf h "SCM_Free(%s)" name'
+          | otherwise -> hPutStr h name'
+toC h (Assignment v p) = do
+  hPrintf h "%s=" (name v)
+  toC h p
+toC h (Alternative c t f) = do
+  boolToC c
+  hPutStr h " ? "
+  toC h t
+  hPutStr h " : "
+  toC h f
+  where
+    boolToC e = do
+      toC h e
+      hPutStr h " != SCM_false"
+toC h (Sequence ps) = foldl1 (>>) (map (toC h) ps)
+toC h (Function vars _ (IndexFreeVars index freeVars)) =
+  let arity = length vars
+      size = length freeVars
+   in do
+        hPrintf
+          h
+          "SCM_close(SCM_CfunctionAddress(function%d), %d, %d"
+          index
+          arity
+          size
+        compileVars freeVars
+        hPutStr h ")"
+  where
+    compileVars :: [Variable IsFreeMutableOrQuote] -> IO ()
+    compileVars (a : as) = do
+      hPrintf h ", %s" (name a)
+      compileVars as
+    compileVars [] = pure ()
+toC h (Application func args) =
+  let n = length args
+   in do
+        hPrintf h "SCM_invoke(%d, " n
+        toC h func
+        compileArgs args
+        hPutStrLn h ");"
+  where
+    compileArgs (a : as) = do
+      hPutStr h ", "
+      toC h a
+      compileArgs as
+    compileArgs [] = pure ()
+toC _ (Magic _) = error "Magic keywords should have been eliminated."
+toC _ (QuasiQuote {}) = error "Quasi quotes should hae been eliminated."
+
+defineClosure :: Handle -> FunctionDefinition -> IO ()
+defineClosure h (FunctionDefinition _ _ freeVars index) = do
+  hPrintf h "SCM_DefineClosure(function%d, " index
+  mapM_ (hPrintf h "SCM %s; " . name) freeVars
+  hPutStrLn h ");\n"
+
+declareFunction :: Handle -> FunctionDefinition -> IO ()
+declareFunction h (FunctionDefinition vars body _ index) = do
+  hPrintf h "SCM_DeclareFunction(function%d) {\n" index
+  mapM_ (hPrintf h "  SCM_DeclareLocalVariable(%s);\n" . name) vars
+  hPutStr h "  return "
+  mapM_ (toC h) body
+  hPutStrLn h "}\n"
+
+genFunctions :: Handle -> [FunctionDefinition] -> IO ()
+genFunctions h ds = do
+  hPutStrLn h "/* Functions */"
+  mapM_ (\d -> defineClosure h d >> declareFunction h d) (reverse ds)

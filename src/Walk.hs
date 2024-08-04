@@ -220,9 +220,9 @@ extract :: Program IsFreeMutable FreeVars -> FlattenedProgram
 extract p =
   let (form, (definitions, quotations)) = (runIdentity $ runStateT (_extract p) ([], []))
       index = length definitions
-      definitions_ = FunctionDefinition [] [form] [] index : definitions
-      form_ = Application (Function [] [] (IndexFreeVars index [])) []
-   in FlattenedProgram form_ definitions_ quotations
+      definitions' = FunctionDefinition [] [form] [] index : definitions
+      form' = Application (Function [] [] (IndexFreeVars index [])) []
+   in FlattenedProgram form' definitions' quotations
 
 _extract :: Program IsFreeMutable FreeVars -> ExtractM (Program IsFreeMutableOrQuote IndexFreeVars)
 _extract (Const c) = do
@@ -234,13 +234,13 @@ _extract (Const c) = do
 _extract (Reference v) = pure $ Reference (fromIsFreeMutable v)
 _extract (Assignment v f) = Assignment (fromIsFreeMutable v) <$> _extract f
 _extract (Function vars body (FreeVars fvars)) =
-  let vars_ = map fromIsFreeMutable vars
-      fvars_ = map fromIsFreeMutable fvars
+  let vars' = map fromIsFreeMutable vars
+      fvars' = map fromIsFreeMutable fvars
    in do
-        body_ <- mapM _extract body
+        body' <- mapM _extract body
         (ds, qs :: [Quotation]) <- get
         let index = length ds
-        let def = FunctionDefinition vars_ body_ fvars_ index
+        let def = FunctionDefinition vars' body' fvars' index
         put (def : ds, qs)
-        return $ Function vars_ [] (IndexFreeVars index fvars_)
+        return $ Function vars' [] (IndexFreeVars index fvars')
 _extract p = walk p _extract
