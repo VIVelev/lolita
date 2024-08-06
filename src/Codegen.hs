@@ -2,6 +2,7 @@ module Codegen where
 
 import Control.Monad (unless)
 import Data.Foldable (find)
+import Data.String (IsString (fromString))
 import Objectify
 import Parse qualified as P (AKind (..), SExp (..))
 import System.IO
@@ -12,7 +13,7 @@ compileToC :: P.SExp -> String -> IO ()
 compileToC e outname =
   case runObjectify (objectify e) defaultPrepEnv of
     Right (obj, globs) ->
-      let prog = extract . free . markMutable . recordMutable $ obj
+      let prog = extract . free . markMutable . recordMutable . primitive $ obj
        in do
             h <- openFile (outname ++ ".c") WriteMode
             genHeader h e
@@ -27,7 +28,7 @@ compileToC e outname =
 genHeader :: Handle -> P.SExp -> IO ()
 genHeader h expr = do
   hPutStrLn h "/* Compiler to C, Version 0.1 */"
-  hPrintf h "/* Source expression:\n  %s */\n" (show expr)
+  hPrintf h "/* Source expression:\n  %s */\n\n" (show expr)
   hPutStrLn h "#include \"scheme.h\""
   hPutStrLn h ""
 
@@ -38,8 +39,13 @@ genTrailer h = do
 genGlobEnv :: Handle -> [Variable ()] -> IO ()
 genGlobEnv h globals = unless (null globals) $ do
   hPutStrLn h "/* Global environment: */"
-  foldl1 (>>) (map (genGlobVar h) globals)
+  foldl (>>) (pure ()) (map (genGlobVar h) (filter notPrimitive globals))
   hPutStrLn h ""
+  where
+    notPrimitive (Variable {name = name}) =
+      case (fromString :: String -> Maybe Primitive) name of
+        Just _ -> False
+        Nothing -> True
 
 genGlobVar :: Handle -> Variable () -> IO ()
 genGlobVar h var =
@@ -113,14 +119,14 @@ scanQuotations h qs@(q@(Quotation index value) : rest) i done =
       hPrintf h "#define thing%d thing%d /* %s */\n" index to (show value)
 scanQuotations _ [] _ _ = pure ()
 
-toC :: Handle -> Program IsFreeMutableOrQuote IndexFreeVars -> IO ()
+toC :: Handle -> Program IsFreeMutablePrimitiveOrQuote IndexFreeVars -> IO ()
 toC _ (Const _) = error "Const can't be compiled to C."
 -- TODO: Handle boxes
 toC h (Reference v) =
   let name' = name v
    in case vInfo v of
         Left _ -> hPrintf h "thing%s" name'
-        Right (IsFreeMutable isFree _)
+        Right (IsFreeMutablePrimitive isFree _ _)
           | isFree -> hPrintf h "SCM_Free(%s)" name'
           | otherwise -> hPutStr h name'
 toC h (Assignment v p) = do
@@ -147,20 +153,48 @@ toC h (Function vars _ (IndexFreeVars index freeVars)) =
           index
           arity
           size
-        compileVars freeVars
+        compileVars (filter notPrimitive freeVars)
         hPutStr h ")"
   where
-    compileVars :: [Variable IsFreeMutableOrQuote] -> IO ()
+    compileVars :: [Variable IsFreeMutablePrimitiveOrQuote] -> IO ()
     compileVars (a : as) = do
       hPrintf h ", %s" (name a)
       compileVars as
     compileVars [] = pure ()
+    notPrimitive (Variable {vInfo = Right (IsFreeMutablePrimitive _ _ Nothing)}) = True
+    notPrimitive _ = False
+toC h (Application (Reference (Variable _ _ (Right (IsFreeMutablePrimitive _ _ (Just prim))))) args) =
+  case prim of
+    Plus -> do
+      hPutStr h "SCM_Add("
+      compileArgs args
+      hPutStr h ")"
+    Minus -> do
+      hPutStr h "SCM_Sub("
+      compileArgs args
+      hPutStr h ")"
+    Times -> do
+      hPutStr h "SCM_Times("
+      compileArgs args
+      hPutStr h ")"
+    Eqn -> do
+      hPutStr h "SCM_Eqn("
+      compileArgs args
+      hPutStr h ")"
+  where
+    compileArgs [a] = do
+      toC h a
+    compileArgs (a : as) = do
+      toC h a
+      hPutStr h ", "
+      compileArgs as
+    compileArgs [] = pure ()
 toC h (Application func args) =
   let n = length args
    in do
         hPutStr h "SCM_invoke("
         toC h func
-        hPrintf h ", %d" n 
+        hPrintf h ", %d" n
         compileArgs args
         hPutStr h ")"
   where
@@ -175,8 +209,13 @@ toC _ (QuasiQuote {}) = error "Quasi quotes should hae been eliminated."
 defineClosure :: Handle -> FunctionDefinition -> IO ()
 defineClosure h (FunctionDefinition _ _ freeVars index) = do
   hPrintf h "SCM_DefineClosure(function%d, " index
-  mapM_ (hPrintf h "SCM %s; " . name) freeVars
+  mapM_
+    (hPrintf h "SCM %s; " . name)
+    (filter notPrimitive freeVars)
   hPutStrLn h ");\n"
+  where
+    notPrimitive (Variable {vInfo = Right (IsFreeMutablePrimitive _ _ Nothing)}) = True
+    notPrimitive _ = False
 
 declareFunction :: Handle -> FunctionDefinition -> IO ()
 declareFunction h (FunctionDefinition vars body _ index) = do
@@ -192,10 +231,10 @@ genFunctions h ds = do
   hPutStrLn h "/* Functions */"
   mapM_ (\d -> defineClosure h d >> declareFunction h d) (reverse ds)
 
-genMain :: Handle -> Program IsFreeMutableOrQuote IndexFreeVars -> IO ()
+genMain :: Handle -> Program IsFreeMutablePrimitiveOrQuote IndexFreeVars -> IO ()
 genMain h form = do
   hPutStrLn h "/* Main */"
-  hPutStrLn h "int main() {"
+  hPutStrLn h "int main(void) {"
   hPutStr h "  SCM_print("
   toC h form
   hPutStrLn h ");"

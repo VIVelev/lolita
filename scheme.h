@@ -4,7 +4,7 @@
 
 #define SCM_FixnumP(x) ((unsigned long)(x) & (unsigned long)1)
 #define SCM_Fixnum2int(x) ((long)(x) >> 1)
-#define SCM_Int2fixnum(i) ((SCM)((i << 1) | 1))
+#define SCM_Int2fixnum(i) ((SCM)(((i) << 1) | 1))
 
 typedef union SCM_object *SCM;
 typedef union SCM_unwrapped_object *SCMRef;
@@ -21,7 +21,7 @@ union SCM_object {
     SCM pname;
   } symbol;
   struct SCM_closure {
-    SCM (*behaviour)();
+    SCM (*behaviour)(void);
     long arity;
     SCM environment[1];
   } closure;
@@ -41,6 +41,7 @@ enum SCM_err {
   SCM_ERR_CANT_ALLOC = 1,
   SCM_ERR_NOT_CALLABLE = 2,
   SCM_ERR_INCORRECT_ARITY = 3,
+  SCM_ERR_NAN = 4,
 };
 
 #define SCM_error(code) SCM_signal_error(code, __LINE__, __FILE__)
@@ -74,7 +75,7 @@ union SCM_unwrapped_object {
   } symbol;
   struct SCM_unwrapped_closure {
     union SCM_header header;
-    SCM (*behaviour)();
+    SCM (*behaviour)(void);
     long arity;
     SCM environment[1];
   } closure;
@@ -125,6 +126,22 @@ SCM_DefineDirectObject(SCM_nil_object, SCM_NULL_TAG);
 #define SCM_SymbolP(x) ((!SCM_FixnumP(x)) && (SCM_2tag(x) == SCM_SYMBOL_TAG))
 #define SCM_StringP(x) ((!SCM_FixnumP(x)) && (SCM_2tag(x) == SCM_STRING_TAG))
 #define SCM_EqP(x, y) (x == y)
+#define SCM_Eqn(x, y)                                                          \
+  ((SCM_FixnumP(x) && SCM_FixnumP(y))                                          \
+       ? SCM_2bool(SCM_Fixnum2int(x) == SCM_Fixnum2int(y))                     \
+       : SCM_error(SCM_ERR_NAN))
+#define SCM_Add(x, y)                                                          \
+  ((SCM_FixnumP(x) && SCM_FixnumP(y))                                          \
+       ? SCM_Int2fixnum(SCM_Fixnum2int(x) + SCM_Fixnum2int(y))                 \
+       : SCM_error(SCM_ERR_NAN))
+#define SCM_Sub(x, y)                                                          \
+  ((SCM_FixnumP(x) && SCM_FixnumP(y))                                          \
+       ? SCM_Int2fixnum(SCM_Fixnum2int(x) - SCM_Fixnum2int(y))                 \
+       : SCM_error(SCM_ERR_NAN))
+#define SCM_Times(x, y)                                                        \
+  ((SCM_FixnumP(x) && SCM_FixnumP(y))                                          \
+       ? SCM_Int2fixnum(SCM_Fixnum2int(x) * SCM_Fixnum2int(y))                 \
+       : SCM_error(SCM_ERR_NAN))
 
 SCM SCM_cons(SCM x, SCM y) {
   SCMRef cell = (SCMRef)malloc(sizeof(struct SCM_unwrapped_pair));

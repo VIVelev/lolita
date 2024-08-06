@@ -10,6 +10,7 @@
       devShells.${system}.default = pkgs.mkShell {
         buildInputs = with pkgs; [
           ghc
+          chicken
           cabal-install
           haskell-language-server
         ];

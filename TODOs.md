@@ -51,7 +51,7 @@
    - [x] Lambda lifting (extracting free variables)
 
 ## Jul 10, 2024
-   - [ ] Refactor code walking stages via type parameters
+   - [x] Refactor code walking stages via type parameters
      - [x] Refactor mutable marking and boxing
    - [x] Add reader macros
      - [x] quote
@@ -73,6 +73,10 @@
        - [x] Some Scheme identifiers are invalid C identifiers,
          so a proper conversion needs to be implemented.
      - [x] Codegen quotations
+
+## Aug 5, 2024
+  - [ ] Integrate primitives
+    - [ ] should add a new `fInfo` type to denote primitive functions
 
 ## Long term
 

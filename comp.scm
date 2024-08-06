@@ -1,6 +1,0 @@
-((lambda (a)
-   ((lambda (f x)
-      (f x))
-    (lambda (x) (add a x))
-    10))
- 100)

@@ -3,6 +3,7 @@
 -- | Turn S-expression into object tree that can be walked.
 module Objectify where
 
+import Data.String (IsString (fromString))
 import MonadT
   ( ErrorT (..),
     Identity (..),
@@ -316,7 +317,7 @@ defaultRunTimeEnv =
 
 eval :: P.SExp -> IO ()
 eval e = case runObjectify (objectify e) defaultPrepEnv of
-  Left err -> print $ "comptime errro: " ++ err
+  Left err -> print $ "comptime error: " ++ err
   Right (obj, _) -> case runEvaluate (evaluate obj) defaultRunTimeEnv of
     Left err -> print $ "runtime error: " ++ show err
     Right res -> print res
