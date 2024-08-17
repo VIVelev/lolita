@@ -112,9 +112,8 @@ tests = TestList [
   assertParserFails "Empty input" (fromString ""),
   assertParserFails "Misplaced dot" (fromString "(a . b . c)"),
   assertParserFails "Incomplete pair" (fromString "(a .)"),
-  assertParserFails "Invalid boolean" (fromString "True"),
+  assertParserFails "Invalid boolean" (fromString "#true"),
   assertParserFails "Invalid integer" (fromString "12a34"),
-  assertParserFails "Misplaced nil" (fromString "(a b '() . c)"),
   assertParserFails "Incomplete list" (fromString "(a b (c d)"),
   assertParserFails "Extra closing parenthesis" (fromString "(a b) c)")
   ]

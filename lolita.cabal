@@ -35,6 +35,6 @@ executable lolita
     import:           warnings
     hs-source-dirs:   src
     main-is:          Main.hs
-    other-modules:    Parse, Objectify, Walk, MonadT
+    other-modules:    Parse, Objectify, Walk, Codegen, MonadT
     build-depends:    base,
     default-language: GHC2021

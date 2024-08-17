@@ -3,7 +3,6 @@
 -- | Turn S-expression into object tree that can be walked.
 module Objectify where
 
-import Data.String (IsString (fromString))
 import MonadT
   ( ErrorT (..),
     Identity (..),
