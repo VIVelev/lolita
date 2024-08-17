@@ -27,7 +27,7 @@ compileToC e outname =
 
 genHeader :: Handle -> P.SExp -> IO ()
 genHeader h expr = do
-  hPutStrLn h "/* Compiler to C, Version 0.1 */"
+  hPutStrLn h "/* Compiler to C, Version 0.2 */"
   hPrintf h "/* Source expression:\n  %s */\n\n" (show expr)
   hPutStrLn h "#include \"scheme.h\""
   hPutStrLn h ""
@@ -57,7 +57,7 @@ genGlobVar h var =
 
 -- TODO: Complete this implementation lol.
 schemeIdToC :: String -> String
-schemeIdToC = id
+schemeIdToC = map (\c -> if c == '-' then '_' else c)
 
 genQuotations :: Handle -> [Quotation] -> IO ()
 genQuotations h qs = unless (null qs) $ do
@@ -127,10 +127,10 @@ toC h (Reference v) =
    in case vInfo v of
         Left _ -> hPrintf h "thing%s" name'
         Right (IsFreeMutablePrimitive isFree _ _)
-          | isFree -> hPrintf h "SCM_Free(%s)" name'
-          | otherwise -> hPutStr h name'
+          | isFree -> hPrintf h "SCM_Free(%s)" (schemeIdToC name')
+          | otherwise -> hPutStr h (schemeIdToC name')
 toC h (Assignment v p) = do
-  hPrintf h "%s=" (name v)
+  hPrintf h "%s=" (schemeIdToC . name $ v)
   toC h p
 toC h (Alternative c t f) = do
   boolToC c
@@ -142,7 +142,11 @@ toC h (Alternative c t f) = do
     boolToC e = do
       toC h e
       hPutStr h " != SCM_false"
-toC h (Sequence ps) = foldl1 (>>) (map (toC h) ps)
+toC h (Sequence body) = do
+  hPutStr h "("
+  mapM_ (\e -> toC h e >> hPutStr h ", ") (take (length body - 1) body)
+  toC h (last body)
+  hPutStr h ")"
 toC h (Function vars _ (IndexFreeVars index freeVars)) =
   let arity = length vars
       size = length freeVars
@@ -158,11 +162,12 @@ toC h (Function vars _ (IndexFreeVars index freeVars)) =
   where
     compileVars :: [Variable IsFreeMutablePrimitiveOrQuote] -> IO ()
     compileVars (a : as) = do
-      hPrintf h ", %s" (name a)
+      hPrintf h ", %s" (schemeIdToC . name $ a)
       compileVars as
     compileVars [] = pure ()
     notPrimitive (Variable {vInfo = Right (IsFreeMutablePrimitive _ _ Nothing)}) = True
     notPrimitive _ = False
+-- \| Primitive function application
 toC h (Application (Reference (Variable _ _ (Right (IsFreeMutablePrimitive _ _ (Just prim))))) args) =
   case prim of
     Plus -> do
@@ -189,6 +194,7 @@ toC h (Application (Reference (Variable _ _ (Right (IsFreeMutablePrimitive _ _ (
       hPutStr h ", "
       compileArgs as
     compileArgs [] = pure ()
+-- \| Non primitive function application
 toC h (Application func args) =
   let n = length args
    in do
@@ -210,7 +216,7 @@ defineClosure :: Handle -> FunctionDefinition -> IO ()
 defineClosure h (FunctionDefinition _ _ freeVars index) = do
   hPrintf h "SCM_DefineClosure(function%d, " index
   mapM_
-    (hPrintf h "SCM %s; " . name)
+    (hPrintf h "SCM %s; " . schemeIdToC . name)
     (filter notPrimitive freeVars)
   hPutStrLn h ");\n"
   where
@@ -220,9 +226,10 @@ defineClosure h (FunctionDefinition _ _ freeVars index) = do
 declareFunction :: Handle -> FunctionDefinition -> IO ()
 declareFunction h (FunctionDefinition vars body _ index) = do
   hPrintf h "SCM_DeclareFunction(function%d) {\n" index
-  mapM_ (hPrintf h "  SCM_DeclareLocalVariable(%s);\n" . name) vars
+  mapM_ (hPrintf h "  SCM_DeclareLocalVariable(%s);\n" . schemeIdToC . name) vars
+  mapM_ (\e -> hPutStr h "  " >> toC h e >> hPutStrLn h ";") (take (length body - 1) body)
   hPutStr h "  return "
-  mapM_ (toC h) body
+  toC h . last $ body
   hPutStr h ";"
   hPutStrLn h "\n}\n"
 
