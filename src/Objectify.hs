@@ -268,6 +268,8 @@ defmacro =
         _ -> throwError "Invalid defmacro syntax: expected (defmacro (name <variables>) <body>)"
     }
 
+-- | Expand a macro.
+-- Note: the macro is being represented as a function.
 invoke :: Program () () -> P.SExp -> ObjectifyM (Program () ())
 invoke (Function vars body _) args =
   case P.listify args of
