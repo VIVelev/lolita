@@ -3,5 +3,6 @@ dist-newstyle/
 .DS_Store
 .envrc
 out.c
+out2.c
 a.out
 *.gch

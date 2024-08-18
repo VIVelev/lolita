@@ -200,7 +200,7 @@ _free (Reference v) = do
   if v `notIn` bounded
     then do
       let newVar = toIsFreeMutablePrimitive True v
-      modify (<> FreeVars [newVar]) -- TODO: appending is not great
+      modify (\vs -> if newVar `notIn` getFreeVars vs then vs <> FreeVars [newVar] else vs)
       return $ Reference newVar
     else return $ Reference $ toIsFreeMutablePrimitive False v
 _free (Assignment v f) = do
@@ -208,7 +208,7 @@ _free (Assignment v f) = do
   if v `notIn` bounded
     then do
       let newVar = toIsFreeMutablePrimitive True v
-      modify (<> FreeVars [newVar])
+      modify (\vs -> if newVar `notIn` getFreeVars vs then vs <> FreeVars [newVar] else vs)
       Assignment newVar <$> _free f
     else Assignment (toIsFreeMutablePrimitive False v) <$> _free f
 _free (Function {Objectify.vars, Objectify.body}) = do
