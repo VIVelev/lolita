@@ -1,8 +1,7 @@
 # A naive LISP interpreted by a tower of interpreters, compiled to C.
 
 lolita is a zero-dependency (using only the 'base' package) implementation of a LISP with full support of macros
-that compiles to C. Of interest in the implementation is the way macros are achieved - lazily building an infinite
-tower of interpreters.
+that compiles to C. Of interest is the way macros are achieved - lazily building an infinite tower of interpreters.
 
 ## A Tower of Interpreters
 
@@ -15,19 +14,20 @@ Consider the `unless` macro
   (unless #t (+ 2 2)))
 ```
 `defmacro` is a special keyword that defines new keywords. In this case,
-the keyword `unless` is defined. Once a new keyword is defined using
-`defmacro`, upon occurrence of the keyword the macro is "expanded"
-by evaluating the body of the macro in a new, meta-level, interpreter.
+the keyword `unless` is defined. Once a new keyword is defined, each occurrence
+is "expanded" by evaluating the body of the macro in a new meta-level interpreter.
 
 If the body of the macro itself contains macro definitions and invocations,
 those macros are in turn expanded, thus, a new meta-meta-level interpreter is created.
 The process is repeated as many times as necessary.
 
-![tower of interpreters diagram](./assets/tower.svg)
+<p align="center">
+  <img src="assets/tower.svg" alt="Tower of interpreters">
+</p>
 
 ## Compilation to C
 
-Code is compiled to C via the supporting `scheme.h` runtime. The output C code is expressed in C macros
+Code is compiled to C and executed via the `scheme.h` runtime. The output C code is expressed in C macros
 defined in `scheme.h` for simplicity and readability. The strategy adopted preserves the flavour of an
 expression-centered language like LISP as much as possible.
 
