@@ -23,7 +23,7 @@ If the body of the macro itself contains macro definitions and invocations,
 those macros are in turn expanded, thus, a new meta-meta-level interpreter is created.
 The process is repeated as many times as necessary.
 
-[tower of interpreters diagram](./assets/tower.svg)
+![tower of interpreters diagram](./assets/tower.svg)
 
 ## Compilation to C
 
@@ -33,7 +33,7 @@ expression-centered language like LISP as much as possible.
 
 ### How to compile?
 
-To compile, for example, the `factorial.scm` example run:
+To compile, for example, `factorial.scm` run:
 ```bash
 cabal run lolita -- factorial.scm
 ```
@@ -41,6 +41,16 @@ This will output a `out.c` file which can then be compiled and ran:
 ```bash
 cc out.c && ./a.out
 ```
+## Source files
+
+- `src/`
+  - `Main.hs` - the command line interface
+  - `MonadT.hs` - simple monad transformers library ala [transformers](https://hackage.haskell.org/package/transformers)
+  - `Parse.hs` - LISP reader implemented with combinators
+  - `Objectify.hs` - AST builder and macro expansion
+  - `Walk.hs` - various code walkers for processing the AST
+  - `Codegen.hs` - performs the final step of converting the processed AST to C code.
+- `scheme.h` - the C runtime required to execute the output C code
 
 ## Leftovers and limitations (things I meant to do, but didn't end up doing)
 
