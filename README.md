@@ -1,4 +1,4 @@
-# A naive LISP interpreted by a tower of interpreters, compiled to C.
+# A naive LISP interpreted by a tower of interpreters, compiled to C
 
 lolita is a zero-dependency (using only the 'base' package) implementation of a LISP with full support of macros
 that compiles to C. Of interest is the way macros are achieved - lazily building an infinite tower of interpreters.
@@ -45,11 +45,11 @@ cc out.c && ./a.out
 
 - `src/`
   - `Main.hs` - the command line interface
-  - `MonadT.hs` - simple monad transformers library ala [transformers](https://hackage.haskell.org/package/transformers)
+  - `MonadT.hs` - simple monad transformers library ala [mtl](https://hackage.haskell.org/package/mtl)
   - `Parse.hs` - LISP reader implemented with combinators
   - `Objectify.hs` - AST builder and macro expansion
   - `Walk.hs` - various code walkers for processing the AST
-  - `Codegen.hs` - performs the final step of converting the processed AST to C code.
+  - `Codegen.hs` - performs the final step of converting the processed AST to C code
 - `scheme.h` - the C runtime required to execute the output C code
 
 ## Leftovers and limitations (things I meant to do, but didn't end up doing)
